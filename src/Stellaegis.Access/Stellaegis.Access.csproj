@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stellaegis.Access</RootNamespace>
+    <PackageId>Stellaegis.Access</PackageId>
+    <Description>Stellaegis Access: the decision point of an application assembled on Stellaegis.Primitives — an actor, a space, an operation; yes or no. It holds the effective rights a registry projects into it, in three domains: persons in a compartment, operators of the platform, M2M clients. It knows neither accounts, nor tokens, nor roles.</Description>
+    <PackageTags>stellaegis;access;authorization;permissions;operations;compartment</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Stellaegis.Primitives" />
+    <PackageReference Include="Stellaegis.Primitives.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <InternalsVisibleTo Include="Stellaegis.Access.Tests" />
+  </ItemGroup>
+
+</Project>

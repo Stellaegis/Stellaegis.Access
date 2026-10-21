@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- The example host: an enterprise application whose rights are Access — one compartment, the company —,
+       with a module of its own decided per operation, the decision and projection routes a server apart would
+       call, and the install verb that projects the rights a registry would. Not a package, never packed. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stellaegis.Access.Sample</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <UserSecretsId>stellaegis-access-sample</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Stellaegis.Access\Stellaegis.Access.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Access.PostgreSQL\Stellaegis.Access.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Access.AspNetCore\Stellaegis.Access.AspNetCore.csproj" />
+    <PackageReference Include="Npgsql" />
+    <!-- The demonstration tokens: a bearer this host mints and validates itself, in place of an issuer. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+  </ItemGroup>
+
+</Project>

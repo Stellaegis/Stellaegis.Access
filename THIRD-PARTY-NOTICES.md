@@ -17,6 +17,7 @@ alongside them, each under its own license.
 
 `Stellaegis.Access.AspNetCore` uses the ASP.NET Core shared framework, which the host already has.
 
-Test-only dependencies (xUnit, the ASP.NET Core test host) are not part of any package and are not
+Test-only dependencies (xUnit, the ASP.NET Core test host) and the dependencies of the example host under
+`samples/` (`Microsoft.AspNetCore.Authentication.JwtBearer`, Npgsql) are not part of any package and are not
 listed here. The PostgreSQL server that the tests and the publishing workflow use is not part of any
 package either.

@@ -9,6 +9,8 @@
     <PackageVersion Include="Stellaegis.Primitives.Data" Version="5.1.0" />
     <PackageVersion Include="Stellaegis.Primitives.AspNetCore" Version="5.1.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.13" />
+    <!-- The cache of decisions of a resource server apart -->
+    <PackageVersion Include="Stellaegis.Caching" Version="5.0.0" />
     <!-- PostgreSQL -->
     <PackageVersion Include="Dapper" Version="2.1.89" />
     <PackageVersion Include="Npgsql" Version="10.0.3" />

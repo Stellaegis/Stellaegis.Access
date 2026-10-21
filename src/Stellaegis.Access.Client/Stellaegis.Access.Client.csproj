@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stellaegis.Access.Client</RootNamespace>
+    <PackageId>Stellaegis.Access.Client</PackageId>
+    <Description>Stellaegis Access for a resource server apart: the decision asked over HTTP of the host that holds Access, under the same port as in process, with a cache of the decisions that the events of Access invalidate.</Description>
+    <PackageTags>stellaegis;access;authorization;client;cache</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Stellaegis.Access\Stellaegis.Access.csproj" />
+    <PackageReference Include="Stellaegis.Primitives.Hosting" />
+    <PackageReference Include="Stellaegis.Caching" />
+    <InternalsVisibleTo Include="Stellaegis.Access.Tests" />
+  </ItemGroup>
+
+</Project>

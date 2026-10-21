@@ -11,10 +11,12 @@
   <ItemGroup>
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Npgsql" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Stellaegis.Access\Stellaegis.Access.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Access.PostgreSQL\Stellaegis.Access.PostgreSQL.csproj" />
   </ItemGroup>
 
   <ItemGroup>

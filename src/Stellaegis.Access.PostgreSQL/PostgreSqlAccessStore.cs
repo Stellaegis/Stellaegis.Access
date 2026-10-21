@@ -1,0 +1,240 @@
+using System.Data.Common;
+using Microsoft.Extensions.Options;
+using Npgsql;
+using Stellaegis.Primitives;
+using Stellaegis.Primitives.Data;
+
+namespace Stellaegis.Access.PostgreSQL;
+
+/// <summary>
+/// The four stores of the rights on PostgreSQL, in the schema <c>authz</c>: one object, one data source, the
+/// repositories of <see cref="AccessDatabase"/> handed out by a unit of work of <c>Stellaegis.Primitives.Data</c>.
+/// Each read of a decision is one query on its own unit of work; each replacement of a snapshot is one transaction
+/// — delete, then insert — so that a decision never reads a subject half projected. No connection outlives a call,
+/// and none is shared between two.
+/// </summary>
+internal sealed class PostgreSqlAccessStore
+    : IMembershipStore, IUserGrantStore, IAdminGrantStore, IClientGrantStore, IAsyncDisposable, IDisposable
+{
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly AdoUnitOfWorkFactory<AccessDatabase> _units;
+
+    /// <summary>Creates the store from options the host validated at startup, or that a caller built by hand.</summary>
+    /// <exception cref="InvalidOperationException">The options do not hold: <see cref="AccessDatabaseOptions.FindError"/> says why.</exception>
+    public PostgreSqlAccessStore(IOptions<AccessDatabaseOptions> options)
+    {
+        var value = Guard.NotNull(options).Value;
+        if (value.FindError() is { } error)
+            throw new InvalidOperationException($"{nameof(AccessDatabaseOptions)}: {error}");
+
+        var registry = new RepositoryRegistry<AccessDatabase>()
+            .Add<MembershipRepository>((connection, transaction) => new MembershipRepository(connection, transaction))
+            .Add<UserGrantRepository>((connection, transaction) => new UserGrantRepository(connection, transaction))
+            .Add<AdminGrantRepository>((connection, transaction) => new AdminGrantRepository(connection, transaction))
+            .Add<ClientGrantRepository>((connection, transaction) => new ClientGrantRepository(connection, transaction));
+
+        _dataSource = NpgsqlDataSource.Create(value.ConnectionString);
+        _units = new AdoUnitOfWorkFactory<AccessDatabase>(_dataSource, registry);
+    }
+
+    /// <summary>Opens a connection under the application's role, as the verification of the database needs one.</summary>
+    public async Task<DbConnection> OpenConnectionAsync(CancellationToken cancellationToken)
+        => await _dataSource.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
+
+    // ── Memberships ──────────────────────────────────────────────────────────
+
+    async Task<bool> IMembershipStore.IsMemberAsync(string subject, Compartment compartment, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(compartment);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<MembershipRepository>().ExistsAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<IReadOnlyList<Compartment>> IMembershipStore.ListAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        var values = await uow.Repo<MembershipRepository>().ListAsync(subject, cancellationToken).ConfigureAwait(false);
+        return values.Select(Compartment.Parse).ToList();
+    }
+
+    async Task IMembershipStore.ReplaceAsync(string subject, IReadOnlyCollection<Compartment> compartments, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(compartments);
+        await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
+        var memberships = uow.Repo<MembershipRepository>();
+        await memberships.DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+        if (compartments.Count > 0)
+            await memberships.InsertAsync(subject, compartments.Select(c => c.Value).Distinct(StringComparer.Ordinal).ToArray(), cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IMembershipStore.RemoveCompartmentAsync(Compartment compartment, CancellationToken cancellationToken)
+    {
+        Guard.NotNull(compartment);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<MembershipRepository>().DeleteByCompartmentAsync(compartment.Value, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IMembershipStore.RemoveSubjectAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<MembershipRepository>().DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    // ── Rights of persons in a compartment ───────────────────────────────────
+
+    async Task<bool> IUserGrantStore.HoldsAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(compartment);
+        Guard.NotWhiteSpace(operation);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<UserGrantRepository>().HoldsAsync(subject, compartment.Value, operation, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<IReadOnlyList<string>> IUserGrantStore.ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(compartment);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<UserGrantRepository>().ListAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IUserGrantStore.ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(compartment);
+        Guard.NotNull(operations);
+        await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
+        var grants = uow.Repo<UserGrantRepository>();
+        await grants.DeleteAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
+        if (operations.Count > 0)
+            await grants.InsertAsync(subject, compartment.Value, Distinct(operations), cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IUserGrantStore.RemoveCompartmentAsync(Compartment compartment, CancellationToken cancellationToken)
+    {
+        Guard.NotNull(compartment);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<UserGrantRepository>().DeleteByCompartmentAsync(compartment.Value, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IUserGrantStore.RemoveSubjectAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<UserGrantRepository>().DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    // ── Rights of the operators of the platform ──────────────────────────────
+
+    async Task<bool> IAdminGrantStore.HoldsAsync(string subject, string operation, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotWhiteSpace(operation);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<AdminGrantRepository>().HoldsAsync(subject, operation, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<bool> IAdminGrantStore.HasAnyAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<AdminGrantRepository>().HasAnyAsync(subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<IReadOnlyList<string>> IAdminGrantStore.ListAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<AdminGrantRepository>().ListAsync(subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IAdminGrantStore.ReplaceAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        Guard.NotNull(operations);
+        await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
+        var grants = uow.Repo<AdminGrantRepository>();
+        await grants.DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+        if (operations.Count > 0)
+            await grants.InsertAsync(subject, Distinct(operations), cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IAdminGrantStore.RemoveSubjectAsync(string subject, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(subject);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<AdminGrantRepository>().DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+    }
+
+    // ── Rights of clients ────────────────────────────────────────────────────
+
+    async Task<bool> IClientGrantStore.HoldsAsync(string clientId, Space space, string operation, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(clientId);
+        Guard.NotNull(space);
+        Guard.NotWhiteSpace(operation);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<ClientGrantRepository>().HoldsAsync(clientId, space.ToSegment(), operation, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<bool> IClientGrantStore.HasAnyAsync(string clientId, Space space, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(clientId);
+        Guard.NotNull(space);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<ClientGrantRepository>().HasAnyAsync(clientId, space.ToSegment(), cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task<IReadOnlyList<string>> IClientGrantStore.ListAsync(string clientId, Space space, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(clientId);
+        Guard.NotNull(space);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        return await uow.Repo<ClientGrantRepository>().ListAsync(clientId, space.ToSegment(), cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IClientGrantStore.ReplaceAsync(string clientId, Space space, IReadOnlyCollection<string> operations, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(clientId);
+        Guard.NotNull(space);
+        Guard.NotNull(operations);
+        await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
+        var grants = uow.Repo<ClientGrantRepository>();
+        await grants.DeleteAsync(clientId, space.ToSegment(), cancellationToken).ConfigureAwait(false);
+        if (operations.Count > 0)
+            await grants.InsertAsync(clientId, space.ToSegment(), Distinct(operations), cancellationToken).ConfigureAwait(false);
+        await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IClientGrantStore.RemoveCompartmentAsync(Compartment compartment, CancellationToken cancellationToken)
+    {
+        Guard.NotNull(compartment);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<ClientGrantRepository>().DeleteBySpaceAsync(compartment.Value, cancellationToken).ConfigureAwait(false);
+    }
+
+    async Task IClientGrantStore.RemoveSubjectAsync(string clientId, CancellationToken cancellationToken)
+    {
+        Guard.NotWhiteSpace(clientId);
+        await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await uow.Repo<ClientGrantRepository>().DeleteBySubjectAsync(clientId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>The operations once each: a snapshot that names one twice would violate the key, not the meaning.</summary>
+    private static string[] Distinct(IReadOnlyCollection<string> operations)
+        => operations.Distinct(StringComparer.Ordinal).ToArray();
+
+    /// <inheritdoc/>
+    public ValueTask DisposeAsync() => _dataSource.DisposeAsync();
+
+    /// <inheritdoc/>
+    public void Dispose() => _dataSource.Dispose();
+}

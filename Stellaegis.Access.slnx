@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/Stellaegis.Access.AspNetCore/Stellaegis.Access.AspNetCore.csproj" />
+    <Project Path="src/Stellaegis.Access.Client/Stellaegis.Access.Client.csproj" />
     <Project Path="src/Stellaegis.Access.PostgreSQL/Stellaegis.Access.PostgreSQL.csproj" />
     <Project Path="src/Stellaegis.Access/Stellaegis.Access.csproj" />
   </Folder>

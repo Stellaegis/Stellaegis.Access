@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Stellaegis.Access.AspNetCore</RootNamespace>
+    <PackageId>Stellaegis.Access.AspNetCore</PackageId>
+    <Description>Stellaegis Access in an ASP.NET Core host: the rights system that answers the policy per operation Stellaegis.Primitives.AspNetCore attaches to a module's routes — the actor and the space read from the request, the decision asked of Access in process or over HTTP —, the three decision routes a resource server apart calls, and the projection routes a registry in another process writes through.</Description>
+    <PackageTags>stellaegis;access;authorization;aspnetcore;policy;operations</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Stellaegis.Access\Stellaegis.Access.csproj" />
+    <PackageReference Include="Stellaegis.Primitives.AspNetCore" />
+    <InternalsVisibleTo Include="Stellaegis.Access.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+</Project>

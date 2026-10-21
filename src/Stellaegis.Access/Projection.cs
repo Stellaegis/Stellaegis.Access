@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Stellaegis.Primitives;
 
 namespace Stellaegis.Access;
@@ -115,7 +116,7 @@ public static class OperationIdentities
     public const string Rule = "target.name, each 1 to 63 lowercase letters, digits and single underscores, starting with a letter and ending with a letter or a digit";
 
     /// <summary>Whether the value is an operation identity.</summary>
-    public static bool IsIdentity(string? value)
+    public static bool IsIdentity([NotNullWhen(true)] string? value)
     {
         if (value is null)
             return false;

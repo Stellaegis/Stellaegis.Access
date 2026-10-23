@@ -1,19 +1,60 @@
+using System.Data.Common;
 using Microsoft.Extensions.DependencyInjection;
-using Npgsql;
-using Stellaegis.Access.PostgreSQL;
 using Stellaegis.Primitives;
+using Stellaegis.Primitives.Data;
 using static Stellaegis.Access.Tests.Fixtures;
 
 namespace Stellaegis.Access.Tests;
 
-/// <summary>
-/// The decision and the projection against a real PostgreSQL, under the application's role: the three steps
-/// replayed on the four tables, the snapshots, the removals, and what the schema itself guarantees.
-/// </summary>
-[Collection(PostgreSqlCollection.Name)]
-public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLifetime
+/// <summary>A database of an engine for the store tests, installed by the installation of the module.</summary>
+public interface IAccessDatabaseFixture : IAsyncLifetime
 {
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+    /// <summary>The connection string a host is configured with.</summary>
+    string AppConnectionString { get; }
+
+    /// <summary>Why the database cannot be used, or <see langword="null"/> when it can.</summary>
+    string? Unavailable { get; }
+
+    /// <summary>Skips the calling test when the database cannot be used.</summary>
+    void SkipWhenUnavailable();
+
+    /// <summary>Registers the stores of the engine, connecting under the application's role.</summary>
+    void AddStores(IServiceCollection services);
+
+    /// <summary>Opens a connection to the test database, under the application's role or the installer's.</summary>
+    Task<DbConnection> OpenAsync(bool asApplication, CancellationToken cancellationToken);
+
+    /// <summary>Empties the four tables, under the application's role, so that each test starts from nothing.</summary>
+    Task ClearAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>What the schema refuses, whatever the engine says it with.</summary>
+public enum Refusal
+{
+    /// <summary>A value its check refuses.</summary>
+    Check,
+
+    /// <summary>A key already taken.</summary>
+    Duplicate,
+
+    /// <summary>A right the role does not hold.</summary>
+    PermissionDenied,
+}
+
+/// <summary>
+/// The decision and the projection against a real engine, under the application's role: the steps replayed on the
+/// four tables, the snapshots, the removals, and what the schema itself guarantees. Every engine runs the same
+/// scenarios; a derived class says how its engine refuses, and checks its own grammars.
+/// </summary>
+public abstract class AccessStoreTests(IAccessDatabaseFixture database) : IAsyncLifetime
+{
+    /// <summary>Asserts that <paramref name="write"/> fails as the engine says <paramref name="refusal"/>.</summary>
+    protected abstract Task AssertRefusedAsync(Func<Task> write, Refusal refusal);
+
+    /// <summary>The declaration of the database of the engine.</summary>
+    protected abstract ModuleDatabase Declaration { get; }
+
+    protected static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private ServiceProvider? _provider;
     private IServiceScope? _scope;
@@ -28,7 +69,7 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
                 var services = new ServiceCollection();
                 services.AddLogging();
                 services.AddSingleton<IEventPublisher>(Events);
-                services.AddStellaegisAccessPostgreSQL(options => options.ConnectionString = database.AppConnectionString);
+                database.AddStores(services);
                 _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
                 _scope = _provider.CreateScope();
             }
@@ -52,6 +93,7 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
     {
         _scope?.Dispose();
         _provider?.Dispose();
+        GC.SuppressFinalize(this);
         return ValueTask.CompletedTask;
     }
 
@@ -199,36 +241,9 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
         // A snapshot the schema refuses — a malformed operation reaches the store only past the module's own check,
         // so the test writes through the store — leaves the previous rights in place: the delete rolled back.
         var store = Services.GetRequiredService<IUserGrantStore>();
-        var exception = await Assert.ThrowsAsync<PostgresException>(() => store.ReplaceAsync(Jane, Acme, [new("items.write"), new("Items.Write")], Ct));
+        await AssertRefusedAsync(() => store.ReplaceAsync(Jane, Acme, [new("items.write"), new("Items.Write")], Ct), Refusal.Check);
 
-        Assert.Equal("23514", exception.SqlState);
         Assert.Equal([new AccessGrant("items.read")], await store.ListAsync(Jane, Acme, Ct));
-    }
-
-    [Theory]
-    [InlineData("insert into authz.memberships (subject, compartment) values ('x', 'Acme')", "23514")]
-    [InlineData("insert into authz.memberships (subject, compartment) values ('x', 'acme-')", "23514")]
-    [InlineData("insert into authz.memberships (subject, compartment) values ('x', 'ac--me')", "23514")]
-    [InlineData("insert into authz.memberships (subject, compartment) values (' x', 'acme')", "23514")]
-    [InlineData("insert into authz.memberships (subject, compartment) values ('', 'acme')", "23514")]
-    [InlineData("insert into authz.user_grants (subject, compartment, operation, requires_second_factor) values ('x', 'acme', 'items-read', false)", "23514")]
-    [InlineData("insert into authz.user_grants (subject, compartment, operation, requires_second_factor) values ('x', 'acme', 'items', false)", "23514")]
-    [InlineData("insert into authz.user_grants (subject, compartment, operation, requires_second_factor) values ('x', 'acme', 'items__a.read', false)", "23514")]
-    [InlineData("insert into authz.admin_grants (subject, operation, requires_second_factor) values ('x', 'a.b.c', false)", "23514")]
-    [InlineData("insert into authz.user_grants (subject, compartment, operation) values ('x', 'acme', 'items.read')", "23502")]
-    [InlineData("insert into authz.admin_grants (subject, operation, requires_second_factor) values ('x', 'items.read', null)", "23502")]
-    [InlineData("insert into authz.client_grants (subject, space, operation) values ('inventory', 'Shared', 'users.read')", "23514")]
-    [InlineData("insert into authz.client_grants (subject, space, operation) values ('inventory', '_other', 'users.read')", "23514")]
-    public async Task The_schema_refuses_what_the_decision_would_never_match(string sql, string sqlState)
-    {
-        database.SkipWhenUnavailable();
-        await using var connection = await database.OpenAsync(asApplication: true, Ct);
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-
-        var exception = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Ct));
-
-        Assert.Equal(sqlState, exception.SqlState);
     }
 
     [Fact]
@@ -244,8 +259,7 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
         await using (var command = connection.CreateCommand())
         {
             command.CommandText = "insert into authz.client_grants (subject, space, operation) values ('inventory', '_shared', 'fiscal_years.validate')";
-            var exception = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Ct));
-            Assert.Equal("23505", exception.SqlState);
+            await AssertRefusedAsync(() => command.ExecuteNonQueryAsync(Ct), Refusal.Duplicate);
         }
 
         Assert.True(await Services.GetRequiredService<IClientGrantStore>().HoldsAsync("inventory", Space.Shared, "fiscal_years.validate", Ct));
@@ -257,11 +271,9 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
         database.SkipWhenUnavailable();
         await using var connection = await database.OpenAsync(asApplication: true, Ct);
         await using var command = connection.CreateCommand();
-        command.CommandText = $"insert into {AccessDatabase.Value.MigrationsTable} (version, script_name, checksum, applied_by) values (9, 'x', 'x', 'x')";
+        command.CommandText = $"insert into {Declaration.MigrationsTable} (version, script_name, checksum, applied_by) values (9, 'x', 'x', 'x')";
 
-        var exception = await Assert.ThrowsAsync<PostgresException>(() => command.ExecuteNonQueryAsync(Ct));
-
-        Assert.Equal("42501", exception.SqlState);
+        await AssertRefusedAsync(() => command.ExecuteNonQueryAsync(Ct), Refusal.PermissionDenied);
     }
 
     private async Task<long> CountAsync(string table)
@@ -269,7 +281,7 @@ public sealed class PostgreSqlStoreTests(PostgreSqlFixture database) : IAsyncLif
         await using var connection = await database.OpenAsync(asApplication: true, Ct);
         await using var command = connection.CreateCommand();
         command.CommandText = $"select count(*) from {table}";
-        return (long)(await command.ExecuteScalarAsync(Ct))!;
+        return Convert.ToInt64(await command.ExecuteScalarAsync(Ct), System.Globalization.CultureInfo.InvariantCulture);
     }
 
     [Fact]

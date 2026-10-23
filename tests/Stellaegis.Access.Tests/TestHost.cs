@@ -53,6 +53,9 @@ internal sealed class TestHost : IDisposable
 /// <summary>The fixtures every test shares: two compartments, a person, two clients, two operations.</summary>
 internal static class Fixtures
 {
+    /// <summary>The frame the databases of the tests are installed for: the one of an enterprise host.</summary>
+    public static readonly ApplicationFrame Frame = ApplicationFrame.SingleCompartment("acme");
+
     public static readonly Compartment Acme = Compartment.Parse("acme");
     public static readonly Compartment Globex = Compartment.Parse("globex");
     public static readonly Guid JaneId = Guid.Parse("3f2504e0-4f89-41d3-9a0c-0305e82c3301");

@@ -2,7 +2,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Stellaegis.Access.PostgreSQL;
 using Stellaegis.Primitives;
 using Stellaegis.Primitives.Data;
 using Stellaegis.Primitives.Hosting;
@@ -10,13 +9,32 @@ using Stellaegis.Primitives.Hosting;
 namespace Stellaegis.Access.Tests;
 
 /// <summary>
-/// A host assembled on the PostgreSQL stores, as an enterprise host is: the database installed by the fixture,
+/// A host assembled on the stores of an engine, as an enterprise host is: the database installed by the fixture,
 /// verified at startup under the application's role, and the decision running on it.
 /// </summary>
-[Collection(PostgreSqlCollection.Name)]
-public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
+public abstract class AccessHostTests(IAccessDatabaseFixture database)
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>The declaration of the database of the engine.</summary>
+    protected abstract ModuleDatabase Declaration { get; }
+
+    /// <summary>The configuration key of the connection string of the adapter.</summary>
+    protected abstract string ConnectionStringKey { get; }
+
+    /// <summary>Registers Access on the adapter, its options bound from <paramref name="configuration"/>.</summary>
+    protected abstract void AddAccess(IServiceCollection services, IConfiguration configuration);
+
+    /// <summary>Registers Access on the adapter, its connection string given.</summary>
+    protected abstract void AddAccess(IServiceCollection services, string connectionString);
+
+    /// <summary>Makes the stores, and the verification, connect under the application's role, when the connection string does not.</summary>
+    protected virtual void UnderApplicationRole(IServiceCollection services)
+    {
+    }
+
+    /// <summary>The statement that renames the record of the installation away, or back.</summary>
+    protected abstract string RenameRecordSql(bool back);
 
     private IHost BuildHost()
     {
@@ -24,13 +42,14 @@ public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
         builder.Logging.ClearProviders();
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
         {
-            ["Stellaegis:Access:PostgreSQL:ConnectionString"] = database.AppConnectionString,
+            [ConnectionStringKey] = database.AppConnectionString,
         });
         builder.Services
-            .AddStellaegisFrame(PostgreSqlFixture.Frame)
+            .AddStellaegisFrame(Fixtures.Frame)
             .AddStellaegisValidation()
-            .AddStellaegisDatabaseVerification()
-            .AddStellaegisAccessPostgreSQL(builder.Configuration);
+            .AddStellaegisDatabaseVerification();
+        AddAccess(builder.Services, builder.Configuration);
+        UnderApplicationRole(builder.Services);
         return builder.Build();
     }
 
@@ -43,7 +62,7 @@ public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
         await host.StartAsync(Ct);
         await host.StopAsync(Ct);
 
-        Assert.Equal([AccessDatabase.Value], host.Services.GetStellaegisModuleDatabases());
+        Assert.Equal([Declaration], host.Services.GetStellaegisModuleDatabases());
         Assert.Contains(host.Services.GetStellaegisModules(), module => module.Module == typeof(AccessModule));
     }
 
@@ -54,15 +73,16 @@ public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.ClearProviders();
         builder.Services
-            .AddStellaegisFrame(PostgreSqlFixture.Frame)
-            .AddStellaegisDatabaseVerification()
-            .AddStellaegisAccessPostgreSQL(options => options.ConnectionString = database.AppConnectionString);
+            .AddStellaegisFrame(Fixtures.Frame)
+            .AddStellaegisDatabaseVerification();
+        AddAccess(builder.Services, database.AppConnectionString);
+        UnderApplicationRole(builder.Services);
         using var host = builder.Build();
         await using (var connection = await database.OpenAsync(asApplication: false, Ct))
         await using (var command = connection.CreateCommand())
         {
             // The record of the installation is what the verification reads first: without it, nothing was installed.
-            command.CommandText = $"alter table {AccessDatabase.Value.MigrationsTable} rename to _schema_migrations_gone";
+            command.CommandText = RenameRecordSql(back: false);
             await command.ExecuteNonQueryAsync(Ct);
         }
 
@@ -75,7 +95,7 @@ public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
         {
             await using var connection = await database.OpenAsync(asApplication: false, Ct);
             await using var command = connection.CreateCommand();
-            command.CommandText = "alter table authz._schema_migrations_gone rename to _schema_migrations";
+            command.CommandText = RenameRecordSql(back: true);
             await command.ExecuteNonQueryAsync(Ct);
         }
     }
@@ -85,7 +105,7 @@ public sealed class PostgreSqlHostTests(PostgreSqlFixture database)
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddStellaegisAccessPostgreSQL(options => options.ConnectionString = " ");
+        AddAccess(services, " ");
         using var provider = services.BuildServiceProvider();
 
         // The options are validated before the store is built: the host's validation at startup says the same.

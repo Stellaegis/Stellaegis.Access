@@ -12,11 +12,13 @@
     <PackageReference Include="xunit.v3" />
     <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <PackageReference Include="Npgsql" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Stellaegis.Access\Stellaegis.Access.csproj" />
     <ProjectReference Include="..\..\src\Stellaegis.Access.PostgreSQL\Stellaegis.Access.PostgreSQL.csproj" />
+    <ProjectReference Include="..\..\src\Stellaegis.Access.SqlServer\Stellaegis.Access.SqlServer.csproj" />
     <ProjectReference Include="..\..\src\Stellaegis.Access.AspNetCore\Stellaegis.Access.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Stellaegis.Access.Client\Stellaegis.Access.Client.csproj" />
   </ItemGroup>

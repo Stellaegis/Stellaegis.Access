@@ -7,6 +7,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [6.0.0] — 2026-10-23
+
+The second factor at the decision, and the stores on SQL Server. A right of a person now says whether it requires a
+session opened with a second factor — the operation's requirement, which the registry projects with the right —,
+and the decision asks the session for one: without it, such a right is refused under its own code, which a refusal
+of a policy now answers in its problem details.
+
+### Migrating from 5.x
+
+1. **Reinstall the schema.** `0001_authz.sql` is corrected in place — no database held real data yet: drop the
+   schema `authz` (`drop schema authz cascade`) and run the installation again. The verification at startup refuses
+   a schema installed from the 5.x script, and says so.
+2. **Project rights, not operations, for persons.** `IAccessProjection.ReplaceUserGrantsAsync` and
+   `ReplaceAdminGrantsAsync` take `IReadOnlyCollection<AccessGrant>`; `AccessGrant.Of(operation)` takes the
+   requirement the module declares. The projection routes `PUT access/user-grants/…` and `access/admin-grants/…` take
+   `[{ "operation", "requiresSecondFactor" }]`, and their `GET` answer it. The rights of clients are unchanged.
+3. **Say whether the session proved a second factor.** `IAccessDecision.DecideAsync` takes `bool secondFactor`
+   before the cancellation token; the decision routes take `secondFactor` in the question of a person, `false` when
+   absent. `AddStellaegisAccessPolicies()` reads it from the `amr` of the principal, `mfa` under either name of the
+   claim.
+4. **Read the refusal as problem details.** A refusal of a policy answers 403 with the code instead of a bare 403,
+   in place of ASP.NET Core's handler of the outcomes; a host that registered its own
+   `IAuthorizationMiddlewareResultHandler` keeps it, and finds the error on `AccessRefusal`.
+5. **A store of your own** implements `IUserGrantStore.FindAsync` and `IAdminGrantStore.FindAsync` in place of
+   `HoldsAsync`, and lists and replaces `AccessGrant`s; `AccessDecisionCache.TryGetYes` and `SetYes` take the proof.
+
+### Added
+
+- `Stellaegis.Access.SqlServer`: the stores and the schema `authz` on SQL Server, the same tables and rules as on
+  PostgreSQL, registered by `AddStellaegisAccessSqlServer` from `Stellaegis:Access:SqlServer`.
+- `AccessGrant`, `AccessErrors.SecondFactorRequired` (`Access.SecondFactorRequired`), `AccessRefusal`.
+
+### Changed
+
+- The decision has four steps: admitted, holds the operation, proved a second factor when the right requires one,
+  the client acting on one's behalf holds it too. The third is said only to whoever holds the operation.
+- An operation given twice in a snapshot requires a second factor when either says so.
+- The cache of a resource server apart keys a yes by the proof: a yes given to a session that proved a second factor
+  never answers one that did not.
+- The packages take `Stellaegis.Primitives` 5.3.0.
+
 ## [5.0.0] — 2026-10-21
 
 First release of the packages: the authorization of the Stellaegis framework, extracted and rewritten on

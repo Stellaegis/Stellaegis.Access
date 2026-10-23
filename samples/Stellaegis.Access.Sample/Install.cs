@@ -91,13 +91,14 @@ public static class Install
 
         // A person, member of the company, who reads and writes the inventory there.
         await projection.ReplaceMembershipsAsync(person, [acme]);
-        await projection.ReplaceUserGrantsAsync(person, acme, [new(InventoryOperations.Read.Identity), new(InventoryOperations.Write.Identity)]);
+        await projection.ReplaceUserGrantsAsync(person, acme, [AccessGrant.Of(InventoryOperations.Read), AccessGrant.Of(InventoryOperations.Write)]);
         Console.WriteLine($"Person {person}: member of {acme}, items.read and items.write there.");
 
-        // An operator of the platform, who purges a compartment from the shared space, asks decisions and projects.
+        // An operator of the platform, who purges a compartment from the shared space — with a second factor, as the
+        // inventory declares it —, asks decisions and projects. Each right carries the requirement its module declares.
         await projection.ReplaceAdminGrantsAsync(operatorOfPlatform,
-            [new(InventoryOperations.Purge.Identity), new(AccessOperations.DecisionsRead.Identity), new(AccessOperations.GrantsRead.Identity), new(AccessOperations.GrantsWrite.Identity)]);
-        Console.WriteLine($"Operator {operatorOfPlatform}: items.purge, decisions.read, grants.read and grants.write in the shared space.");
+            [AccessGrant.Of(InventoryOperations.Purge), AccessGrant.Of(AccessOperations.DecisionsRead), AccessGrant.Of(AccessOperations.GrantsRead), AccessGrant.Of(AccessOperations.GrantsWrite)]);
+        Console.WriteLine($"Operator {operatorOfPlatform}: items.purge (with a second factor), decisions.read, grants.read and grants.write in the shared space.");
 
         // A client of the company, named after it, which reads the inventory there and nothing else.
         await projection.ReplaceClientGrantsAsync("c_acme_robot", Space.Of(acme), [InventoryOperations.Read.Identity]);

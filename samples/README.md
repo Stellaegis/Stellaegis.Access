@@ -27,7 +27,7 @@ schema under the administration connection, then projects the rights the example
 | Subject | Kind | Where | Rights |
 | --- | --- | --- | --- |
 | `3f2504e04f8941d39a0c0305e82c3301` (`Sample:Person`) | a person | member of `acme` | `items.read`, `items.write` in `acme` |
-| `9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d` (`Sample:Operator`) | a person | the shared space | `items.purge`, `decisions.read`, `grants.read`, `grants.write` |
+| `9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d` (`Sample:Operator`) | a person | the shared space | `items.purge` — with a second factor, as the inventory declares it —, `decisions.read`, `grants.read`, `grants.write` |
 | `c_acme_robot` | a client of the company | `acme` | `items.read` |
 | `registry` | the client of a registry | the shared space | `grants.read`, `grants.write` |
 
@@ -46,31 +46,35 @@ and serves `https://localhost:7121`. The HTTPS development certificate of the ma
 ## Playing
 
 A token for each actor, from the demonstration route — `subject` for a person, `clientId` for a client, `act` for
-the client acting on the person's behalf:
+the client acting on the person's behalf, `amr` for the methods the person's session proved, as an issuer writes them
+from the sign-in:
 
 ```powershell
 $base = "https://localhost:7121"
 $person   = (curl.exe -sk -X POST "$base/demo/token?subject=3f2504e04f8941d39a0c0305e82c3301" | ConvertFrom-Json).access_token
-$operator = (curl.exe -sk -X POST "$base/demo/token?subject=9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d" | ConvertFrom-Json).access_token
+$operator = (curl.exe -sk -X POST "$base/demo/token?subject=9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d&amr=pwd" | ConvertFrom-Json).access_token
+$operatorMfa = (curl.exe -sk -X POST "$base/demo/token?subject=9b1deb4d3b7d4bad9bdd2b0d7b3dcb6d&amr=pwd,otp,mfa" | ConvertFrom-Json).access_token
 $robot    = (curl.exe -sk -X POST "$base/demo/token?clientId=c_acme_robot" | ConvertFrom-Json).access_token
 $viaRobot = (curl.exe -sk -X POST "$base/demo/token?subject=3f2504e04f8941d39a0c0305e82c3301&act=c_acme_robot" | ConvertFrom-Json).access_token
 $registry = (curl.exe -sk -X POST "$base/demo/token?clientId=registry" | ConvertFrom-Json).access_token
 ```
 
-Then the decisions, each the three steps of Access — admitted in the space, holds the operation, the client acting
-on one's behalf holds it too:
+Then the decisions, each the steps of Access — admitted in the space, holds the operation, proved a second factor
+when the right requires one, the client acting on one's behalf holds the operation too:
 
 ```powershell
 # The person reads and writes the inventory of the company (200, 201), and does not purge it: purging acts ON a
-# compartment and is decided in the shared space, where the person is nobody (403, Access.NotMember in the log).
+# compartment and is decided in the shared space, where the person is nobody (403, Access.NotMember).
 curl.exe -sk "$base/api/items" -H "Authorization: Bearer $person"
 curl.exe -sk -X POST "$base/api/items" -H "Authorization: Bearer $person" -H "Content-Type: application/json" -d '{"name":"bolt"}'
 curl.exe -sk -X DELETE "$base/api/admin/inventory/compartments/acme" -H "Authorization: Bearer $person" -w "%{http_code}"
 
-# The operator purges the company (200) — and does not read its inventory: an operator of the platform is nobody
-# in a compartment they are not a member of (403, Access.NotMember).
+# The operator does not purge with a password alone: the right requires a second factor (403,
+# Access.SecondFactorRequired). Signed in with one, the operator purges the company (200) — and does not read its
+# inventory: an operator of the platform is nobody in a compartment they are not a member of (403, Access.NotMember).
 curl.exe -sk -X DELETE "$base/api/admin/inventory/compartments/acme" -H "Authorization: Bearer $operator"
-curl.exe -sk "$base/api/items" -H "Authorization: Bearer $operator" -w "%{http_code}"
+curl.exe -sk -X DELETE "$base/api/admin/inventory/compartments/acme" -H "Authorization: Bearer $operatorMfa"
+curl.exe -sk "$base/api/items" -H "Authorization: Bearer $operatorMfa" -w "%{http_code}"
 
 # The robot reads (200) and does not write (403, Access.Denied).
 curl.exe -sk "$base/api/items" -H "Authorization: Bearer $robot"
@@ -82,24 +86,24 @@ curl.exe -sk "$base/api/items" -H "Authorization: Bearer $viaRobot"
 curl.exe -sk -X POST "$base/api/items" -H "Authorization: Bearer $viaRobot" -H "Content-Type: application/json" -d '{"name":"nut"}' -w "%{http_code}"
 ```
 
-A refusal of a policy is a bare 403: ASP.NET Core answers it, and the code of the decision — `Access.NotMember`,
-`Access.Denied`, `Access.ViaDenied` — is in the host's log, `Access refused (…)`. The decision routes, which a
-resource server apart calls, answer the code in their problem details.
+A refusal of a policy answers 403 with problem details carrying the code of the decision — `Access.NotMember`,
+`Access.Denied`, `Access.SecondFactorRequired`, `Access.ViaDenied` —, as the decision routes a resource server apart
+calls answer it: a client tells a session to open again with a second factor from a right it does not hold.
 
 The projection, as a registry in another process does it — a snapshot replacing the person's rights in the company,
 which changes the next answer at once:
 
 ```powershell
-curl.exe -sk -X PUT "$base/api/access/user-grants/3f2504e04f8941d39a0c0305e82c3301/acme" -H "Authorization: Bearer $registry" -H "Content-Type: application/json" -d '["items.read"]' -w "%{http_code}"
+curl.exe -sk -X PUT "$base/api/access/user-grants/3f2504e04f8941d39a0c0305e82c3301/acme" -H "Authorization: Bearer $registry" -H "Content-Type: application/json" -d '[{"operation":"items.read","requiresSecondFactor":false}]' -w "%{http_code}"
 curl.exe -sk -X POST "$base/api/items" -H "Authorization: Bearer $person" -H "Content-Type: application/json" -d '{"name":"bolt"}' -w "%{http_code}"   # 403 now
-curl.exe -sk "$base/api/access/user-grants/3f2504e04f8941d39a0c0305e82c3301/acme" -H "Authorization: Bearer $registry"   # ["items.read"]
+curl.exe -sk "$base/api/access/user-grants/3f2504e04f8941d39a0c0305e82c3301/acme" -H "Authorization: Bearer $registry"   # [{"operation":"items.read","requiresSecondFactor":false}]
 ```
 
-And a decision asked over HTTP, as a resource server apart would — the operator holds `decisions.read`, the robot
-does not:
+And a decision asked over HTTP, as a resource server apart would, saying whether the person's session proved a
+second factor — the operator holds `decisions.read`, the robot does not:
 
 ```powershell
-curl.exe -sk -X POST "$base/api/access/users/decide" -H "Authorization: Bearer $operator" -H "Content-Type: application/json" -d '{"subject":"3f2504e04f8941d39a0c0305e82c3301","compartment":"acme","operation":"items.write"}'
+curl.exe -sk -X POST "$base/api/access/users/decide" -H "Authorization: Bearer $operator" -H "Content-Type: application/json" -d '{"subject":"3f2504e04f8941d39a0c0305e82c3301","compartment":"acme","operation":"items.write","secondFactor":false}'
 curl.exe -sk -X POST "$base/api/access/users/decide" -H "Authorization: Bearer $robot" -H "Content-Type: application/json" -d '{"subject":"3f2504e04f8941d39a0c0305e82c3301","compartment":"acme","operation":"items.read"}' -w "%{http_code}"
 ```
 

@@ -29,12 +29,15 @@ public sealed class InventoryModule : IStellaegisModule
         .WithOperations(InventoryOperations.All);
 }
 
-/// <summary>The operations of the inventory: what a registry grants, by identity.</summary>
+/// <summary>
+/// The operations of the inventory: what a registry grants, by identity. Purging a compartment is the one sensitive
+/// enough to require a session opened with a second factor, whoever holds it.
+/// </summary>
 public static class InventoryOperations
 {
     public static readonly Operation Read = new("items", "read", OperationKind.Read);
     public static readonly Operation Write = new("items", "write", OperationKind.Write);
-    public static readonly Operation Purge = new("items", "purge", OperationKind.Delete);
+    public static readonly Operation Purge = new("items", "purge", OperationKind.Delete, requiresSecondFactor: true);
     public static IReadOnlyList<Operation> All { get; } = [Read, Write, Purge];
 }
 
@@ -161,10 +164,11 @@ public static class DemoTokens
 
     /// <summary>
     /// <c>POST /demo/token?subject=…</c> for a person, <c>?clientId=…</c> for a client, <c>&amp;act=…</c> for the
-    /// client acting on the person's behalf. Anonymous, by construction: it is the demonstration.
+    /// client acting on the person's behalf, <c>&amp;amr=pwd,otp,mfa</c> for the methods the person's session proved —
+    /// what an issuer writes from the sign-in. Anonymous, by construction: it is the demonstration.
     /// </summary>
     public static IEndpointConventionBuilder MapDemoTokenEndpoint(this IEndpointRouteBuilder routes)
-        => routes.MapPost("/demo/token", (string? subject, string? clientId, string? act, IConfiguration configuration) =>
+        => routes.MapPost("/demo/token", (string? subject, string? clientId, string? act, string? amr, IConfiguration configuration) =>
             {
                 if (string.IsNullOrWhiteSpace(subject) == string.IsNullOrWhiteSpace(clientId))
                     return Results.BadRequest(new { error = "Name a subject (a person) or a clientId (a client), one of the two." });
@@ -172,6 +176,8 @@ public static class DemoTokens
                 var claims = new List<Claim> { subject is not null ? new Claim("sub", subject) : new Claim("client_id", clientId!) };
                 if (!string.IsNullOrWhiteSpace(act))
                     claims.Add(new Claim("act", act));
+                if (subject is not null && !string.IsNullOrWhiteSpace(amr))
+                    claims.AddRange(amr.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(method => new Claim("amr", method)));
 
                 var token = new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
                 {

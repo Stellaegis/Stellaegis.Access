@@ -197,4 +197,47 @@ public sealed class PoliciesTests
             Assert.Equal(HttpStatusCode.OK, (await app.AsPerson(Jane, amr: "pwd,mfa", amrClaim: "http://schemas.microsoft.com/claims/authnmethodsreferences").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
         }
     }
+
+    [Fact]
+    public async Task A_refusal_of_a_policy_answers_problem_details_with_the_code_of_Access()
+    {
+        await using var app = await WebTestHost.StartAsync(ct: Ct);
+        var projection = ProjectionOf(app, out var scope);
+        using (scope)
+        {
+            var notMember = await app.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, notMember.StatusCode);
+            Assert.Equal(AccessErrors.NotMemberCode, await notMember.CodeOfAsync(Ct));
+
+            await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
+            Assert.Equal(AccessErrors.DeniedCode, await (await app.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).CodeOfAsync(Ct));
+
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity, RequiresSecondFactor: true)], Ct);
+            var secondFactor = await app.AsPerson(Jane, amr: "pwd").GetAsync("/api/orgs/acme/items", Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, secondFactor.StatusCode);
+            Assert.Equal(AccessErrors.SecondFactorRequiredCode, await secondFactor.CodeOfAsync(Ct));
+
+            // Nobody authenticated is still challenged, as ASP.NET Core does.
+            Assert.Equal(HttpStatusCode.Unauthorized, (await app.GetTestClient().GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+        }
+    }
+
+    private sealed class HostOutcomes : Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler
+    {
+        public Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, Microsoft.AspNetCore.Authorization.Policy.PolicyAuthorizationResult authorizeResult)
+            => next(context);
+    }
+
+    [Fact]
+    public void The_refusals_replace_the_answer_of_ASP_NET_Core_and_never_one_the_host_brought()
+    {
+        static Type? Outcomes(IServiceCollection services)
+            => services.Last(descriptor => descriptor.ServiceType == typeof(Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler)).ImplementationType;
+
+        Assert.Equal("AccessRefusalResultHandler", Outcomes(new ServiceCollection().AddStellaegisAccessPolicies())!.Name);
+
+        var host = new ServiceCollection();
+        host.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler, HostOutcomes>();
+        Assert.Equal(typeof(HostOutcomes), Outcomes(host.AddStellaegisAccessPolicies()));
+    }
 }

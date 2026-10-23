@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -59,8 +60,8 @@ internal sealed class AccessPolicyProvider(IOptions<AuthorizationOptions> option
 /// <summary>
 /// Answers an <see cref="AccessRequirement"/>: reads the actor, the client acting on its behalf and the space from
 /// the request, and asks <see cref="IAccessDecision"/> — the decision in process, or the one over HTTP that
-/// <c>Stellaegis.Access.Client</c> registers under the same port. A refusal fails the requirement with the code of
-/// the error in its reason, for the host's log; ASP.NET Core answers 403.
+/// <c>Stellaegis.Access.Client</c> registers under the same port. A refusal fails the requirement with the error
+/// itself, <see cref="AccessRefusal"/>, which <see cref="AccessRefusalResultHandler"/> answers as problem details.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -113,7 +114,7 @@ internal sealed class AccessRequirementHandler(
         if (result.IsSuccess)
             context.Succeed(requirement);
         else
-            context.Fail(new AuthorizationFailureReason(this, $"{result.Error!.Code}: {result.Error.Message}"));
+            context.Fail(new AccessRefusal(this, result.Error!));
     }
 
     // A policy required by hand, [Authorize(Policy = "items.read")], names an identity without a kind: the kind
@@ -122,6 +123,37 @@ internal sealed class AccessRequirementHandler(
     {
         var dot = identity.IndexOf('.', StringComparison.Ordinal);
         return new Operation(identity[..dot], identity[(dot + 1)..], OperationKind.Read);
+    }
+}
+
+/// <summary>
+/// Why Access refused a requirement: the error of the decision, with its code — <c>Access.NotMember</c>,
+/// <c>Access.Denied</c>, <c>Access.ViaDenied</c>, <c>Access.SecondFactorRequired</c>.
+/// </summary>
+public sealed class AccessRefusal(IAuthorizationHandler handler, Error error)
+    : AuthorizationFailureReason(handler, $"{Guard.NotNull(error).Code}: {error.Message}")
+{
+    /// <summary>The error of the decision.</summary>
+    public Error Error { get; } = error;
+}
+
+/// <summary>
+/// Answers a request a policy of Access refused as problem details with the code of the refusal, 403, as the decision
+/// routes answer — so that a client tells a session to open again with a second factor from a right it does not hold.
+/// Every other outcome — a challenge, a policy of the host's own — goes to ASP.NET Core's default handler.
+/// </summary>
+internal sealed class AccessRefusalResultHandler : IAuthorizationMiddlewareResultHandler
+{
+    private readonly AuthorizationMiddlewareResultHandler _default = new();
+
+    public async Task HandleAsync(RequestDelegate next, HttpContext context, AuthorizationPolicy policy, PolicyAuthorizationResult authorizeResult)
+    {
+        if (authorizeResult.Forbidden && authorizeResult.AuthorizationFailure?.FailureReasons.OfType<AccessRefusal>().FirstOrDefault() is { } refusal)
+        {
+            await Result.Failure(refusal.Error).ToHttpResult().ExecuteAsync(context).ConfigureAwait(false);
+            return;
+        }
+        await _default.HandleAsync(next, context, policy, authorizeResult).ConfigureAwait(false);
     }
 }
 
@@ -237,7 +269,10 @@ public static class AccessPoliciesServiceCollectionExtensions
     /// ...
     /// app.MapGroup("/api").MapDocumentsEndpoints().RequireAuthorizationPerOperation(op => op.ToString());
     /// </code>
-    /// Any policy whose name is not an operation identity keeps going to ASP.NET Core's default provider.
+    /// Any policy whose name is not an operation identity keeps going to ASP.NET Core's default provider. A refusal of
+    /// Access is answered as problem details with its code, 403, in place of ASP.NET Core's handler of the outcomes; a
+    /// host that registered its own <see cref="IAuthorizationMiddlewareResultHandler"/> keeps it, and answers the
+    /// refusals itself — the error is on <see cref="AccessRefusal"/>.
     /// </summary>
     public static IServiceCollection AddStellaegisAccessPolicies(this IServiceCollection services)
     {
@@ -248,6 +283,13 @@ public static class AccessPoliciesServiceCollectionExtensions
         services.RemoveAll<IAuthorizationPolicyProvider>();
         services.AddSingleton<IAuthorizationPolicyProvider, AccessPolicyProvider>();
         services.TryAddEnumerable(ServiceDescriptor.Scoped<IAuthorizationHandler, AccessRequirementHandler>());
+        // AddAuthorization registers ASP.NET Core's own handler of the outcomes: replaced, unless the host brought its own.
+        var outcomes = services.LastOrDefault(descriptor => descriptor.ServiceType == typeof(IAuthorizationMiddlewareResultHandler));
+        if (outcomes is null || outcomes.ImplementationType == typeof(AuthorizationMiddlewareResultHandler))
+        {
+            services.RemoveAll<IAuthorizationMiddlewareResultHandler>();
+            services.AddSingleton<IAuthorizationMiddlewareResultHandler, AccessRefusalResultHandler>();
+        }
         return services;
     }
 }

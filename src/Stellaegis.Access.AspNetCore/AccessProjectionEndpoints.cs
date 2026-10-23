@@ -15,13 +15,14 @@ namespace Stellaegis.Access.AspNetCore;
 /// Under <c>grants.write</c>:
 /// <list type="bullet">
 ///   <item><c>PUT access/memberships/{subject}</c> — the compartments the person is admitted in, as an array; empty removes them all</item>
-///   <item><c>PUT access/user-grants/{subject}/{compartment}</c> — the operations the person holds in the compartment</item>
-///   <item><c>PUT access/admin-grants/{subject}</c> — the operations the person holds in the shared space</item>
+///   <item><c>PUT access/user-grants/{subject}/{compartment}</c> — the rights the person holds in the compartment, as an
+///   array of <c>{ "operation": "items.read", "requiresSecondFactor": false }</c></item>
+///   <item><c>PUT access/admin-grants/{subject}</c> — the rights the person holds in the shared space, in the same form</item>
 ///   <item><c>PUT access/client-grants/{subject}/{space}</c> — the operations the client holds in the space, <c>_shared</c> or a compartment</item>
 ///   <item><c>DELETE access/compartments/{compartment}</c> — the compartment is terminated</item>
 ///   <item><c>DELETE access/subjects/persons/{subject}</c>, <c>DELETE access/subjects/clients/{subject}</c> — the subject is gone</item>
 /// </list>
-/// Under <c>grants.read</c>, the <c>GET</c> of the four first routes. The module has no compartments: the routes
+/// Under <c>grants.read</c>, the <c>GET</c> of the four first routes, in the form their <c>PUT</c> takes. The module has no compartments: the routes
 /// read no request context, and the host grants these operations, in the shared space, to the client of its
 /// registry.
 /// </remarks>
@@ -62,13 +63,13 @@ public static class AccessProjectionEndpoints
             .WithMetadata(AccessOperations.GrantsRead)
             .Produces<string[]>(StatusCodes.Status200OK);
 
-        group.MapPut("/user-grants/{subject}/{compartment}", async (string subject, string compartment, string[] operations, IAccessProjection projection, CancellationToken ct) =>
+        group.MapPut("/user-grants/{subject}/{compartment}", async (string subject, string compartment, AccessGrant[] grants, IAccessProjection projection, CancellationToken ct) =>
             {
                 if (!IsSubject(subject) || !Compartment.TryParse(compartment, out var parsed))
                     return Invalid("A grant snapshot names a person and a compartment.");
-                if (Operations(operations) is not { } identities)
-                    return Invalid($"A grant snapshot is an array of operation identities: {OperationIdentities.Rule}.");
-                await projection.ReplaceUserGrantsAsync(subject, parsed, identities.Select(operation => new AccessGrant(operation)).ToList(), ct);
+                if (Grants(grants) is not { } rights)
+                    return Invalid($"A grant snapshot of a person is an array of rights, each an operation identity — {OperationIdentities.Rule} — and whether it requires a second factor.");
+                await projection.ReplaceUserGrantsAsync(subject, parsed, rights, ct);
                 return Results.NoContent();
             })
             .WithMetadata(AccessOperations.GrantsWrite)
@@ -77,18 +78,18 @@ public static class AccessProjectionEndpoints
 
         group.MapGet("/user-grants/{subject}/{compartment}", async (string subject, string compartment, IUserGrantStore grants, CancellationToken ct) =>
                 IsSubject(subject) && Compartment.TryParse(compartment, out var parsed)
-                    ? Results.Ok((await grants.ListAsync(subject, parsed, ct)).Select(grant => grant.Operation).ToArray())
+                    ? Results.Ok((await grants.ListAsync(subject, parsed, ct)).ToArray())
                     : Invalid("A grant snapshot names a person and a compartment."))
             .WithMetadata(AccessOperations.GrantsRead)
-            .Produces<string[]>(StatusCodes.Status200OK);
+            .Produces<AccessGrant[]>(StatusCodes.Status200OK);
 
-        group.MapPut("/admin-grants/{subject}", async (string subject, string[] operations, IAccessProjection projection, CancellationToken ct) =>
+        group.MapPut("/admin-grants/{subject}", async (string subject, AccessGrant[] grants, IAccessProjection projection, CancellationToken ct) =>
             {
                 if (!IsSubject(subject))
                     return Invalid("A grant snapshot names a person.");
-                if (Operations(operations) is not { } identities)
-                    return Invalid($"A grant snapshot is an array of operation identities: {OperationIdentities.Rule}.");
-                await projection.ReplaceAdminGrantsAsync(subject, identities.Select(operation => new AccessGrant(operation)).ToList(), ct);
+                if (Grants(grants) is not { } rights)
+                    return Invalid($"A grant snapshot of a person is an array of rights, each an operation identity — {OperationIdentities.Rule} — and whether it requires a second factor.");
+                await projection.ReplaceAdminGrantsAsync(subject, rights, ct);
                 return Results.NoContent();
             })
             .WithMetadata(AccessOperations.GrantsWrite)
@@ -97,10 +98,10 @@ public static class AccessProjectionEndpoints
 
         group.MapGet("/admin-grants/{subject}", async (string subject, IAdminGrantStore grants, CancellationToken ct) =>
                 IsSubject(subject)
-                    ? Results.Ok((await grants.ListAsync(subject, ct)).Select(grant => grant.Operation).ToArray())
+                    ? Results.Ok((await grants.ListAsync(subject, ct)).ToArray())
                     : Invalid("A subject is an actor."))
             .WithMetadata(AccessOperations.GrantsRead)
-            .Produces<string[]>(StatusCodes.Status200OK);
+            .Produces<AccessGrant[]>(StatusCodes.Status200OK);
 
         group.MapPut("/client-grants/{subject}/{space}", async (string subject, string space, string[] operations, IAccessProjection projection, CancellationToken ct) =>
             {
@@ -164,4 +165,7 @@ public static class AccessProjectionEndpoints
 
     private static IReadOnlyCollection<string>? Operations(string[]? operations)
         => operations is not null && operations.All(OperationIdentities.IsIdentity) ? operations : null;
+
+    private static IReadOnlyCollection<AccessGrant>? Grants(AccessGrant[]? grants)
+        => grants is not null && grants.All(grant => grant is not null && OperationIdentities.IsIdentity(grant.Operation)) ? grants : null;
 }

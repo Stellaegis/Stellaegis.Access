@@ -20,26 +20,26 @@ public sealed class DecisionTests
     {
         using var host = new TestHost();
 
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
 
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, Ct), AccessErrors.DeniedCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.DeniedCode);
 
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
-        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, Ct)).IsSuccess);
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsWrite, Ct), AccessErrors.DeniedCode);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsWrite, secondFactor: false, Ct), AccessErrors.DeniedCode);
 
         // The right is in acme; globex is another compartment, with its own membership.
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Globex, ItemsRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Globex, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
     }
 
     [Fact]
     public async Task A_right_without_a_membership_grants_nothing()
     {
         using var host = new TestHost();
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
 
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
     }
 
     [Fact]
@@ -47,16 +47,16 @@ public sealed class DecisionTests
     {
         using var host = new TestHost();
 
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
 
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [ItemsRead.Identity], Ct);
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, Ct), AccessErrors.DeniedCode);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(ItemsRead.Identity)], Ct);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, secondFactor: false, Ct), AccessErrors.DeniedCode);
 
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [ItemsRead.Identity, UsersRead.Identity], Ct);
-        Assert.True((await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, Ct)).IsSuccess);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(ItemsRead.Identity), new(UsersRead.Identity)], Ct);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, secondFactor: false, Ct)).IsSuccess);
 
         // Being an operator of the platform admits nobody in a compartment.
-        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, UsersRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, UsersRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
     }
 
     [Fact]
@@ -65,13 +65,13 @@ public sealed class DecisionTests
         using var host = new TestHost();
         var desktop = Actor.Parse(Desktop);
 
-        AssertRefused(await host.Decision.DecideAsync(desktop, Acme, ItemsRead, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(desktop, Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
 
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
-        Assert.True((await host.Decision.DecideAsync(desktop, Acme, ItemsRead, Ct)).IsSuccess);
-        AssertRefused(await host.Decision.DecideAsync(desktop, Acme, ItemsWrite, Ct), AccessErrors.DeniedCode);
-        AssertRefused(await host.Decision.DecideAsync(desktop, Globex, ItemsRead, Ct), AccessErrors.NotMemberCode);
-        AssertRefused(await host.Decision.DecideAsync(desktop, Space.Shared, ItemsRead, Ct), AccessErrors.NotMemberCode);
+        Assert.True((await host.Decision.DecideAsync(desktop, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+        AssertRefused(await host.Decision.DecideAsync(desktop, Acme, ItemsWrite, secondFactor: false, Ct), AccessErrors.DeniedCode);
+        AssertRefused(await host.Decision.DecideAsync(desktop, Globex, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
+        AssertRefused(await host.Decision.DecideAsync(desktop, Space.Shared, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
     }
 
     [Fact]
@@ -81,8 +81,8 @@ public sealed class DecisionTests
         var inventory = Actor.Parse(Inventory);
         await host.Projection.ReplaceClientGrantsAsync(Inventory, Space.Shared, [UsersRead.Identity], Ct);
 
-        Assert.True((await host.Decision.DecideAsync(inventory, Space.Shared, UsersRead, Ct)).IsSuccess);
-        AssertRefused(await host.Decision.DecideAsync(inventory, Acme, UsersRead, Ct), AccessErrors.NotMemberCode);
+        Assert.True((await host.Decision.DecideAsync(inventory, Space.Shared, UsersRead, secondFactor: false, Ct)).IsSuccess);
+        AssertRefused(await host.Decision.DecideAsync(inventory, Acme, UsersRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
     }
 
     [Fact]
@@ -90,15 +90,15 @@ public sealed class DecisionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity, ItemsWrite.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity), new(ItemsWrite.Identity)], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
         var janeViaDesktop = JaneActor.Through(Actor.Parse(Desktop));
 
-        Assert.True((await host.Decision.DecideAsync(janeViaDesktop, Acme, ItemsRead, Ct)).IsSuccess);
+        Assert.True((await host.Decision.DecideAsync(janeViaDesktop, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
         // Jane may write; the desktop may not: the client restricts, never widens.
-        AssertRefused(await host.Decision.DecideAsync(janeViaDesktop, Acme, ItemsWrite, Ct), AccessErrors.ViaDeniedCode);
+        AssertRefused(await host.Decision.DecideAsync(janeViaDesktop, Acme, ItemsWrite, secondFactor: false, Ct), AccessErrors.ViaDeniedCode);
         // The person's own refusal comes first.
-        AssertRefused(await host.Decision.DecideAsync(janeViaDesktop, Acme, UsersRead, Ct), AccessErrors.DeniedCode);
+        AssertRefused(await host.Decision.DecideAsync(janeViaDesktop, Acme, UsersRead, secondFactor: false, Ct), AccessErrors.DeniedCode);
     }
 
     [Fact]
@@ -106,12 +106,12 @@ public sealed class DecisionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
 
-        AssertRefused(await host.Decision.DecideAsync(JaneActor.Through(Actor.Job("import")), Acme, ItemsRead, Ct), AccessErrors.ViaDeniedCode);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor.Through(Actor.Job("import")), Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.ViaDeniedCode);
 
         await host.Projection.ReplaceClientGrantsAsync("job:import", Acme, [ItemsRead.Identity], Ct);
-        Assert.True((await host.Decision.DecideAsync(JaneActor.Through(Actor.Job("import")), Acme, ItemsRead, Ct)).IsSuccess);
+        Assert.True((await host.Decision.DecideAsync(JaneActor.Through(Actor.Job("import")), Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
     }
 
     [Fact]
@@ -122,8 +122,58 @@ public sealed class DecisionTests
         var clientId = Guid.NewGuid().ToString("N");
         await host.Projection.ReplaceClientGrantsAsync(clientId, Acme, [ItemsRead.Identity], Ct);
 
-        AssertRefused(await host.Decision.DecideAsync(Actor.Parse(clientId), Acme, ItemsRead, Ct), AccessErrors.NotMemberCode);
-        Assert.True((await host.Decision.DecideAsync(AccessSubject.Client(clientId), null, Acme, ItemsRead, Ct)).IsSuccess);
+        AssertRefused(await host.Decision.DecideAsync(Actor.Parse(clientId), Acme, ItemsRead, secondFactor: false, Ct), AccessErrors.NotMemberCode);
+        Assert.True((await host.Decision.DecideAsync(AccessSubject.Client(clientId), null, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+    }
+    [Fact]
+    public async Task A_right_that_requires_a_second_factor_is_refused_to_a_session_without_one_and_said_only_to_its_holder()
+    {
+        using var host = new TestHost();
+        await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
+
+        // Not held: refused as any operation not held, whatever the session proved.
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, PayrollPay, secondFactor: false, Ct), AccessErrors.DeniedCode);
+
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [AccessGrant.Of(PayrollPay), AccessGrant.Of(ItemsRead)], Ct);
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Acme, PayrollPay, secondFactor: false, Ct), AccessErrors.SecondFactorRequiredCode);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, PayrollPay, secondFactor: true, Ct)).IsSuccess);
+
+        // The requirement is the operation's: the other right of the same snapshot opens without one.
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task In_the_shared_space_a_right_that_requires_a_second_factor_is_refused_without_one()
+    {
+        using var host = new TestHost();
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(UsersRead.Identity, RequiresSecondFactor: true)], Ct);
+
+        AssertRefused(await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, secondFactor: false, Ct), AccessErrors.SecondFactorRequiredCode);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Space.Shared, UsersRead, secondFactor: true, Ct)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task Through_a_client_the_second_factor_is_the_persons_and_the_client_must_still_hold_the_operation()
+    {
+        using var host = new TestHost();
+        await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [AccessGrant.Of(PayrollPay)], Ct);
+        var throughDesktop = JaneActor.Through(Actor.Parse(Desktop));
+
+        AssertRefused(await host.Decision.DecideAsync(throughDesktop, Acme, PayrollPay, secondFactor: false, Ct), AccessErrors.SecondFactorRequiredCode);
+        AssertRefused(await host.Decision.DecideAsync(throughDesktop, Acme, PayrollPay, secondFactor: true, Ct), AccessErrors.ViaDeniedCode);
+
+        await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [PayrollPay.Identity], Ct);
+        Assert.True((await host.Decision.DecideAsync(throughDesktop, Acme, PayrollPay, secondFactor: true, Ct)).IsSuccess);
+    }
+
+    [Fact]
+    public async Task A_client_has_no_second_factor_and_its_rights_never_ask_for_one()
+    {
+        using var host = new TestHost();
+        await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [PayrollPay.Identity], Ct);
+
+        Assert.True((await host.Decision.DecideAsync(AccessSubject.Client(Desktop), null, Acme, PayrollPay, secondFactor: false, Ct)).IsSuccess);
     }
 }
 
@@ -149,4 +199,5 @@ public sealed class SubjectTests
         Assert.Throws<ArgumentException>(() => AccessSubject.Client(""));
         Assert.Throws<ArgumentException>(() => AccessSubject.Person(Guid.Empty));
     }
+
 }

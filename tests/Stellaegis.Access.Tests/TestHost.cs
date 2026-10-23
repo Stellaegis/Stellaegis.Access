@@ -63,4 +63,5 @@ internal static class Fixtures
     public static readonly Operation ItemsRead = new("items", "read", OperationKind.Read);
     public static readonly Operation ItemsWrite = new("items", "write", OperationKind.Write);
     public static readonly Operation UsersRead = new("users", "read", OperationKind.Read);
+    public static readonly Operation PayrollPay = new("payroll", "pay", OperationKind.Write, requiresSecondFactor: true);
 }

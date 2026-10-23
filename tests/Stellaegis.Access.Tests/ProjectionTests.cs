@@ -15,14 +15,14 @@ public sealed class ProjectionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme, Globex], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity, ItemsWrite.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity), new(ItemsWrite.Identity)], Ct);
         Assert.Equal([Acme, Globex], await host.Services.GetRequiredService<IMembershipStore>().ListAsync(Jane, Ct));
-        Assert.Equal(["items.read", "items.write"], await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct));
+        Assert.Equal(["items.read", "items.write"], (await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct)).Select(grant => grant.Operation));
 
         await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [], Ct);
         await host.Projection.ReplaceMembershipsAsync(Jane, [], Ct);
 
-        Assert.Empty(await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct));
+        Assert.Empty((await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct)).Select(grant => grant.Operation));
         Assert.Empty(await host.Services.GetRequiredService<IMembershipStore>().ListAsync(Jane, Ct));
         Assert.Empty(host.Data.UserGrants);
         Assert.Empty(host.Data.Memberships);
@@ -32,11 +32,11 @@ public sealed class ProjectionTests
     public async Task A_snapshot_replaces_rather_than_adds()
     {
         using var host = new TestHost();
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [ItemsRead.Identity, ItemsWrite.Identity], Ct);
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [UsersRead.Identity], Ct);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(ItemsRead.Identity), new(ItemsWrite.Identity)], Ct);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(UsersRead.Identity)], Ct);
 
-        Assert.Equal(["users.read"], await host.Services.GetRequiredService<IAdminGrantStore>().ListAsync(Jane, Ct));
-        Assert.False(await host.Services.GetRequiredService<IAdminGrantStore>().HoldsAsync(Jane, ItemsRead.Identity, Ct));
+        Assert.Equal(["users.read"], (await host.Services.GetRequiredService<IAdminGrantStore>().ListAsync(Jane, Ct)).Select(grant => grant.Operation));
+        Assert.Null(await host.Services.GetRequiredService<IAdminGrantStore>().FindAsync(Jane, ItemsRead.Identity, Ct));
     }
 
     [Fact]
@@ -44,20 +44,20 @@ public sealed class ProjectionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme, Globex], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Globex, [ItemsRead.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Globex, [new(ItemsRead.Identity)], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Inventory, Space.Shared, [UsersRead.Identity], Ct);
 
         await host.Projection.RemoveCompartmentAsync(Acme, Ct);
 
         Assert.Equal([Globex], await host.Services.GetRequiredService<IMembershipStore>().ListAsync(Jane, Ct));
-        Assert.Empty(await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct));
-        Assert.Equal(["items.read"], await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Globex, Ct));
+        Assert.Empty((await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct)).Select(grant => grant.Operation));
+        Assert.Equal(["items.read"], (await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Globex, Ct)).Select(grant => grant.Operation));
         Assert.False(await host.Services.GetRequiredService<IClientGrantStore>().HasAnyAsync(Desktop, Acme, Ct));
         Assert.True(await host.Services.GetRequiredService<IClientGrantStore>().HasAnyAsync(Inventory, Space.Shared, Ct));
-        Assert.True((await host.Decision.DecideAsync(JaneActor, Globex, ItemsRead, Ct)).IsSuccess);
-        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, Ct)).IsFailure);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Globex, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+        Assert.True((await host.Decision.DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct)).IsFailure);
     }
 
     [Fact]
@@ -65,8 +65,8 @@ public sealed class ProjectionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [UsersRead.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(UsersRead.Identity)], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Space.Shared, [ItemsRead.Identity], Ct);
 
@@ -84,8 +84,8 @@ public sealed class ProjectionTests
     {
         using var host = new TestHost();
         await host.Projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
-        await host.Projection.ReplaceAdminGrantsAsync(Jane, [UsersRead.Identity], Ct);
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
+        await host.Projection.ReplaceAdminGrantsAsync(Jane, [new(UsersRead.Identity)], Ct);
         await host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
         await host.Projection.RemoveCompartmentAsync(Globex, Ct);
         await host.Projection.RemoveSubjectAsync(AccessSubject.Client(Desktop), Ct);
@@ -112,8 +112,8 @@ public sealed class ProjectionTests
     {
         using var host = new TestHost();
 
-        await Assert.ThrowsAsync<ArgumentException>(() => host.Projection.ReplaceUserGrantsAsync(Jane, Acme, ["items-read"], Ct));
-        await Assert.ThrowsAsync<ArgumentException>(() => host.Projection.ReplaceAdminGrantsAsync(Jane, ["read"], Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new("items-read")], Ct));
+        await Assert.ThrowsAsync<ArgumentException>(() => host.Projection.ReplaceAdminGrantsAsync(Jane, [new("read", true)], Ct));
         await Assert.ThrowsAsync<ArgumentException>(() => host.Projection.ReplaceClientGrantsAsync(Desktop, Acme, ["Items.Read"], Ct));
         Assert.Empty(host.Data.UserGrants);
         Assert.Empty(host.Events.Events);
@@ -122,6 +122,16 @@ public sealed class ProjectionTests
         Assert.False(OperationIdentities.IsIdentity("fiscal_years"));
         Assert.False(OperationIdentities.IsIdentity(".validate"));
         Assert.False(OperationIdentities.IsIdentity("a.b.c"));
+    }
+    [Fact]
+    public async Task An_operation_projected_twice_requires_a_second_factor_when_either_says_so()
+    {
+        using var host = new TestHost();
+
+        await host.Projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity), new(ItemsRead.Identity, RequiresSecondFactor: true), new(ItemsWrite.Identity)], Ct);
+
+        Assert.Equal([new AccessGrant(ItemsRead.Identity, true), new AccessGrant(ItemsWrite.Identity, false)],
+            await host.Services.GetRequiredService<IUserGrantStore>().ListAsync(Jane, Acme, Ct));
     }
 }
 
@@ -154,4 +164,5 @@ public sealed class ModuleTests
         Assert.NotNull(scope.ServiceProvider.GetRequiredService<IAccessProjection>());
         Assert.IsType<NullEventPublisher>(provider.GetRequiredService<IEventPublisher>());
     }
+
 }

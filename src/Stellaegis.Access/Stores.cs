@@ -27,18 +27,19 @@ public interface IMembershipStore
 
 /// <summary>
 /// Where the rights of persons in compartments are kept: one row per <c>(subject, compartment, operation)</c>, the
-/// operation by its identity, <c>target.name</c>. Replaced by snapshot, a compartment at a time.
+/// operation by its identity, <c>target.name</c>, with whether it requires a second factor. Replaced by snapshot, a
+/// compartment at a time.
 /// </summary>
 public interface IUserGrantStore
 {
-    /// <summary>Whether the person holds the operation in the compartment.</summary>
-    Task<bool> HoldsAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken = default);
+    /// <summary>The right of the person on the operation in the compartment, or <see langword="null"/> when they do not hold it.</summary>
+    Task<AccessGrant?> FindAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken = default);
 
-    /// <summary>The operations the person holds in the compartment, by identity.</summary>
-    Task<IReadOnlyList<string>> ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken = default);
+    /// <summary>The rights of the person in the compartment, by operation identity.</summary>
+    Task<IReadOnlyList<AccessGrant>> ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the rights of the person in the compartment by <paramref name="operations"/>; empty removes them all.</summary>
-    Task ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default);
+    /// <summary>Replaces the rights of the person in the compartment by <paramref name="grants"/>, one per operation; empty removes them all.</summary>
+    Task ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default);
 
     /// <summary>Removes every right granted in the compartment, once it is terminated.</summary>
     Task RemoveCompartmentAsync(Compartment compartment, CancellationToken cancellationToken = default);
@@ -49,21 +50,22 @@ public interface IUserGrantStore
 
 /// <summary>
 /// Where the rights of the operators of the platform are kept: one row per <c>(subject, operation)</c>, the shared
-/// space implicit. A person with any row here is admitted in the shared space. Replaced by snapshot.
+/// space implicit, with whether it requires a second factor. A person with any row here is admitted in the shared
+/// space. Replaced by snapshot.
 /// </summary>
 public interface IAdminGrantStore
 {
-    /// <summary>Whether the person holds the operation in the shared space.</summary>
-    Task<bool> HoldsAsync(string subject, string operation, CancellationToken cancellationToken = default);
+    /// <summary>The right of the person on the operation in the shared space, or <see langword="null"/> when they do not hold it.</summary>
+    Task<AccessGrant?> FindAsync(string subject, string operation, CancellationToken cancellationToken = default);
 
     /// <summary>Whether the person holds any operation in the shared space — is an operator of the platform.</summary>
     Task<bool> HasAnyAsync(string subject, CancellationToken cancellationToken = default);
 
-    /// <summary>The operations the person holds in the shared space, by identity.</summary>
-    Task<IReadOnlyList<string>> ListAsync(string subject, CancellationToken cancellationToken = default);
+    /// <summary>The rights of the person in the shared space, by operation identity.</summary>
+    Task<IReadOnlyList<AccessGrant>> ListAsync(string subject, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the rights of the person in the shared space by <paramref name="operations"/>; empty removes them all.</summary>
-    Task ReplaceAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default);
+    /// <summary>Replaces the rights of the person in the shared space by <paramref name="grants"/>, one per operation; empty removes them all.</summary>
+    Task ReplaceAsync(string subject, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default);
 
     /// <summary>Removes every right of the person in the shared space.</summary>
     Task RemoveSubjectAsync(string subject, CancellationToken cancellationToken = default);

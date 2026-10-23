@@ -68,7 +68,7 @@ public static class AccessProjectionEndpoints
                     return Invalid("A grant snapshot names a person and a compartment.");
                 if (Operations(operations) is not { } identities)
                     return Invalid($"A grant snapshot is an array of operation identities: {OperationIdentities.Rule}.");
-                await projection.ReplaceUserGrantsAsync(subject, parsed, identities, ct);
+                await projection.ReplaceUserGrantsAsync(subject, parsed, identities.Select(operation => new AccessGrant(operation)).ToList(), ct);
                 return Results.NoContent();
             })
             .WithMetadata(AccessOperations.GrantsWrite)
@@ -77,7 +77,7 @@ public static class AccessProjectionEndpoints
 
         group.MapGet("/user-grants/{subject}/{compartment}", async (string subject, string compartment, IUserGrantStore grants, CancellationToken ct) =>
                 IsSubject(subject) && Compartment.TryParse(compartment, out var parsed)
-                    ? Results.Ok((await grants.ListAsync(subject, parsed, ct)).ToArray())
+                    ? Results.Ok((await grants.ListAsync(subject, parsed, ct)).Select(grant => grant.Operation).ToArray())
                     : Invalid("A grant snapshot names a person and a compartment."))
             .WithMetadata(AccessOperations.GrantsRead)
             .Produces<string[]>(StatusCodes.Status200OK);
@@ -88,7 +88,7 @@ public static class AccessProjectionEndpoints
                     return Invalid("A grant snapshot names a person.");
                 if (Operations(operations) is not { } identities)
                     return Invalid($"A grant snapshot is an array of operation identities: {OperationIdentities.Rule}.");
-                await projection.ReplaceAdminGrantsAsync(subject, identities, ct);
+                await projection.ReplaceAdminGrantsAsync(subject, identities.Select(operation => new AccessGrant(operation)).ToList(), ct);
                 return Results.NoContent();
             })
             .WithMetadata(AccessOperations.GrantsWrite)
@@ -97,7 +97,7 @@ public static class AccessProjectionEndpoints
 
         group.MapGet("/admin-grants/{subject}", async (string subject, IAdminGrantStore grants, CancellationToken ct) =>
                 IsSubject(subject)
-                    ? Results.Ok((await grants.ListAsync(subject, ct)).ToArray())
+                    ? Results.Ok((await grants.ListAsync(subject, ct)).Select(grant => grant.Operation).ToArray())
                     : Invalid("A subject is an actor."))
             .WithMetadata(AccessOperations.GrantsRead)
             .Produces<string[]>(StatusCodes.Status200OK);

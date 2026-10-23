@@ -39,21 +39,22 @@ public interface IAccessClientTokenProvider
 /// <summary>
 /// The decision asked over HTTP, under the same port as in process: a person in a compartment goes to
 /// <c>users/decide</c>, a person in the shared space to <c>admins/decide</c>, a client to <c>clients/decide</c>.
-/// A 204 is a yes; a problem details is the refusal, with its code; anything else is an error of transport.
+/// A 204 is a yes; a problem details is the refusal, with its code; anything else is an error of transport. The
+/// question for a person carries whether the session proved a second factor.
 /// </summary>
 public sealed class HttpAccessDecision(HttpClient http, IServiceProvider services) : IAccessDecision
 {
     private readonly IAccessClientTokenProvider? _tokens = Guard.NotNull(services).GetService<IAccessClientTokenProvider>();
 
     /// <inheritdoc/>
-    public ValueTask<Result> DecideAsync(Actor actor, Space space, Operation operation, CancellationToken cancellationToken = default)
+    public ValueTask<Result> DecideAsync(Actor actor, Space space, Operation operation, bool secondFactor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(actor);
-        return DecideAsync(AccessSubject.Of(actor), actor.Via is { } via ? AccessSubject.Of(via) : null, space, operation, cancellationToken);
+        return DecideAsync(AccessSubject.Of(actor), actor.Via is { } via ? AccessSubject.Of(via) : null, space, operation, secondFactor, cancellationToken);
     }
 
     /// <inheritdoc/>
-    public async ValueTask<Result> DecideAsync(AccessSubject subject, AccessSubject? via, Space space, Operation operation, CancellationToken cancellationToken = default)
+    public async ValueTask<Result> DecideAsync(AccessSubject subject, AccessSubject? via, Space space, Operation operation, bool secondFactor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(subject);
         Guard.NotNull(space);
@@ -62,8 +63,8 @@ public sealed class HttpAccessDecision(HttpClient http, IServiceProvider service
         var (route, body) = subject.Kind == SubjectKind.Client
             ? ("clients/decide", (object)new ClientQuestion(subject.Id, space.ToSegment(), operation.Identity, via?.Id))
             : space.Compartment is { } compartment
-                ? ("users/decide", new UserQuestion(subject.Id, compartment.Value, operation.Identity, via?.Id))
-                : ("admins/decide", new AdminQuestion(subject.Id, operation.Identity, via?.Id));
+                ? ("users/decide", new UserQuestion(subject.Id, compartment.Value, operation.Identity, via?.Id, secondFactor))
+                : ("admins/decide", new AdminQuestion(subject.Id, operation.Identity, via?.Id, secondFactor));
 
         using var request = new HttpRequestMessage(HttpMethod.Post, route) { Content = JsonContent.Create(body, body.GetType()) };
         if (_tokens is not null && await _tokens.GetTokenAsync(cancellationToken).ConfigureAwait(false) is { } token)
@@ -76,9 +77,9 @@ public sealed class HttpAccessDecision(HttpClient http, IServiceProvider service
         throw new HttpRequestException($"Access answered {(int)response.StatusCode} without an error to read.", null, response.StatusCode);
     }
 
-    private sealed record UserQuestion(string Subject, string Compartment, string Operation, string? Via);
+    private sealed record UserQuestion(string Subject, string Compartment, string Operation, string? Via, bool SecondFactor);
 
-    private sealed record AdminQuestion(string Subject, string Operation, string? Via);
+    private sealed record AdminQuestion(string Subject, string Operation, string? Via, bool SecondFactor);
 
     private sealed record ClientQuestion(string Subject, string Space, string Operation, string? Via);
 }

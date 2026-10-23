@@ -65,12 +65,15 @@ public sealed class AccessDecisionCache : IDisposable
     /// <summary>Whether decisions are cached.</summary>
     public bool Enabled => _cache is not null;
 
-    /// <summary>Whether a yes is held for the question.</summary>
-    public bool TryGetYes(AccessSubject subject, AccessSubject? via, Space space, Operation operation)
-        => _cache is not null && _cache.TryGet<bool>(Key(subject, via, space, operation), out var yes) && yes;
+    /// <summary>
+    /// Whether a yes is held for the question. The proof of a second factor is part of the question: a yes given to a
+    /// session that proved one never answers a session that did not.
+    /// </summary>
+    public bool TryGetYes(AccessSubject subject, AccessSubject? via, Space space, Operation operation, bool secondFactor)
+        => _cache is not null && _cache.TryGet<bool>(Key(subject, via, space, operation, secondFactor), out var yes) && yes;
 
     /// <summary>Keeps a yes for the question, under the segments of its space and of its subjects.</summary>
-    public void SetYes(AccessSubject subject, AccessSubject? via, Space space, Operation operation)
+    public void SetYes(AccessSubject subject, AccessSubject? via, Space space, Operation operation, bool secondFactor)
     {
         if (_cache is null)
             return;
@@ -81,7 +84,7 @@ public sealed class AccessDecisionCache : IDisposable
         };
         if (via is not null)
             tokens.Add(_segments.GetToken(SubjectSegment(via.Id)));
-        _cache.Set(Key(subject, via, space, operation), true, tokens);
+        _cache.Set(Key(subject, via, space, operation, secondFactor), true, tokens);
     }
 
     /// <summary>Drops every decision taken in the space — a compartment terminated, the rights of a space replaced.</summary>
@@ -117,8 +120,8 @@ public sealed class AccessDecisionCache : IDisposable
     /// <inheritdoc/>
     public void Dispose() => _cache?.Dispose();
 
-    private static string Key(AccessSubject subject, AccessSubject? via, Space space, Operation operation)
-        => $"{subject.Kind}:{subject.Id}:{via?.Id ?? "-"}:{space.ToSegment()}:{operation.Identity}";
+    private static string Key(AccessSubject subject, AccessSubject? via, Space space, Operation operation, bool secondFactor)
+        => $"{subject.Kind}:{subject.Id}:{via?.Id ?? "-"}:{space.ToSegment()}:{operation.Identity}:{(secondFactor ? "mfa" : "-")}";
 
     private static string SpaceSegment(Space space) => $"space:{space.ToSegment()}";
 
@@ -128,22 +131,22 @@ public sealed class AccessDecisionCache : IDisposable
 /// <summary>The decision over HTTP behind the cache: a yes held is answered without a round trip.</summary>
 internal sealed class CachedAccessDecision(IAccessDecision inner, AccessDecisionCache cache) : IAccessDecision
 {
-    public ValueTask<Result> DecideAsync(Actor actor, Space space, Operation operation, CancellationToken cancellationToken = default)
+    public ValueTask<Result> DecideAsync(Actor actor, Space space, Operation operation, bool secondFactor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(actor);
-        return DecideAsync(AccessSubject.Of(actor), actor.Via is { } via ? AccessSubject.Of(via) : null, space, operation, cancellationToken);
+        return DecideAsync(AccessSubject.Of(actor), actor.Via is { } via ? AccessSubject.Of(via) : null, space, operation, secondFactor, cancellationToken);
     }
 
-    public async ValueTask<Result> DecideAsync(AccessSubject subject, AccessSubject? via, Space space, Operation operation, CancellationToken cancellationToken = default)
+    public async ValueTask<Result> DecideAsync(AccessSubject subject, AccessSubject? via, Space space, Operation operation, bool secondFactor, CancellationToken cancellationToken = default)
     {
         Guard.NotNull(subject);
         Guard.NotNull(space);
         Guard.NotNull(operation);
-        if (cache.TryGetYes(subject, via, space, operation))
+        if (cache.TryGetYes(subject, via, space, operation, secondFactor))
             return Result.Success();
-        var result = await inner.DecideAsync(subject, via, space, operation, cancellationToken).ConfigureAwait(false);
+        var result = await inner.DecideAsync(subject, via, space, operation, secondFactor, cancellationToken).ConfigureAwait(false);
         if (result.IsSuccess)
-            cache.SetYes(subject, via, space, operation);
+            cache.SetYes(subject, via, space, operation, secondFactor);
         return result;
     }
 }

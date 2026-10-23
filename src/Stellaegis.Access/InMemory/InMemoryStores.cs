@@ -9,11 +9,11 @@ public sealed class InMemoryAccessData
     /// <summary>The memberships: subject → compartments.</summary>
     internal ConcurrentDictionary<string, HashSet<Compartment>> Memberships { get; } = new(StringComparer.Ordinal);
 
-    /// <summary>The user grants: (subject, compartment) → operation identities.</summary>
-    internal ConcurrentDictionary<(string Subject, Compartment Compartment), HashSet<string>> UserGrants { get; } = new();
+    /// <summary>The user grants: (subject, compartment) → operation identity → whether it requires a second factor.</summary>
+    internal ConcurrentDictionary<(string Subject, Compartment Compartment), Dictionary<string, bool>> UserGrants { get; } = new();
 
-    /// <summary>The admin grants: subject → operation identities.</summary>
-    internal ConcurrentDictionary<string, HashSet<string>> AdminGrants { get; } = new(StringComparer.Ordinal);
+    /// <summary>The admin grants: subject → operation identity → whether it requires a second factor.</summary>
+    internal ConcurrentDictionary<string, Dictionary<string, bool>> AdminGrants { get; } = new(StringComparer.Ordinal);
 
     /// <summary>The client grants: (client, space) → operation identities.</summary>
     internal ConcurrentDictionary<(string Client, Space Space), HashSet<string>> ClientGrants { get; } = new();
@@ -28,6 +28,9 @@ public sealed class InMemoryAccessData
     }
 
     internal static HashSet<string> Set(IReadOnlyCollection<string> values) => new(values, StringComparer.Ordinal);
+
+    internal static Dictionary<string, bool> Map(IReadOnlyCollection<AccessGrant> grants)
+        => AccessGrant.Merge(grants).ToDictionary(grant => grant.Operation, grant => grant.RequiresSecondFactor, StringComparer.Ordinal);
 }
 
 internal sealed class InMemoryMembershipStore(InMemoryAccessData data) : IMembershipStore
@@ -80,18 +83,18 @@ internal sealed class InMemoryMembershipStore(InMemoryAccessData data) : IMember
 
 internal sealed class InMemoryUserGrantStore(InMemoryAccessData data) : IUserGrantStore
 {
-    public Task<bool> HoldsAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken = default)
-        => Task.FromResult(data.UserGrants.TryGetValue((subject, compartment), out var set) && Sets.Contains(set, operation));
+    public Task<AccessGrant?> FindAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken = default)
+        => Task.FromResult(data.UserGrants.TryGetValue((subject, compartment), out var map) ? Grants.Find(map, operation) : null);
 
-    public Task<IReadOnlyList<string>> ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<string>>(data.UserGrants.TryGetValue((subject, compartment), out var set) ? Sets.Snapshot(set) : []);
+    public Task<IReadOnlyList<AccessGrant>> ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<AccessGrant>>(data.UserGrants.TryGetValue((subject, compartment), out var map) ? Grants.Snapshot(map) : []);
 
-    public Task ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default)
+    public Task ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default)
     {
-        if (operations.Count == 0)
+        if (grants.Count == 0)
             data.UserGrants.TryRemove((subject, compartment), out _);
         else
-            data.UserGrants[(subject, compartment)] = InMemoryAccessData.Set(operations);
+            data.UserGrants[(subject, compartment)] = InMemoryAccessData.Map(grants);
         return Task.CompletedTask;
     }
 
@@ -112,21 +115,21 @@ internal sealed class InMemoryUserGrantStore(InMemoryAccessData data) : IUserGra
 
 internal sealed class InMemoryAdminGrantStore(InMemoryAccessData data) : IAdminGrantStore
 {
-    public Task<bool> HoldsAsync(string subject, string operation, CancellationToken cancellationToken = default)
-        => Task.FromResult(data.AdminGrants.TryGetValue(subject, out var set) && Sets.Contains(set, operation));
+    public Task<AccessGrant?> FindAsync(string subject, string operation, CancellationToken cancellationToken = default)
+        => Task.FromResult(data.AdminGrants.TryGetValue(subject, out var map) ? Grants.Find(map, operation) : null);
 
     public Task<bool> HasAnyAsync(string subject, CancellationToken cancellationToken = default)
-        => Task.FromResult(data.AdminGrants.TryGetValue(subject, out var set) && Sets.Any(set));
+        => Task.FromResult(data.AdminGrants.TryGetValue(subject, out var map) && Grants.Any(map));
 
-    public Task<IReadOnlyList<string>> ListAsync(string subject, CancellationToken cancellationToken = default)
-        => Task.FromResult<IReadOnlyList<string>>(data.AdminGrants.TryGetValue(subject, out var set) ? Sets.Snapshot(set) : []);
+    public Task<IReadOnlyList<AccessGrant>> ListAsync(string subject, CancellationToken cancellationToken = default)
+        => Task.FromResult<IReadOnlyList<AccessGrant>>(data.AdminGrants.TryGetValue(subject, out var map) ? Grants.Snapshot(map) : []);
 
-    public Task ReplaceAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default)
+    public Task ReplaceAsync(string subject, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default)
     {
-        if (operations.Count == 0)
+        if (grants.Count == 0)
             data.AdminGrants.TryRemove(subject, out _);
         else
-            data.AdminGrants[subject] = InMemoryAccessData.Set(operations);
+            data.AdminGrants[subject] = InMemoryAccessData.Map(grants);
         return Task.CompletedTask;
     }
 
@@ -191,5 +194,27 @@ internal static class Sets
     {
         lock (set)
             return set.Order(StringComparer.Ordinal).ToList();
+    }
+}
+
+/// <summary>Reads of the grants of a person under their lock, the map being replaced whole by a projection.</summary>
+internal static class Grants
+{
+    public static AccessGrant? Find(Dictionary<string, bool> map, string operation)
+    {
+        lock (map)
+            return map.TryGetValue(operation, out var requires) ? new AccessGrant(operation, requires) : null;
+    }
+
+    public static bool Any(Dictionary<string, bool> map)
+    {
+        lock (map)
+            return map.Count > 0;
+    }
+
+    public static List<AccessGrant> Snapshot(Dictionary<string, bool> map)
+    {
+        lock (map)
+            return map.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => new AccessGrant(pair.Key, pair.Value)).ToList();
     }
 }

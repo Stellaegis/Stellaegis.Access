@@ -15,13 +15,22 @@ public interface IAccessProjection
     /// <summary>Replaces the compartments the person is admitted in; empty removes them all.</summary>
     Task ReplaceMembershipsAsync(string subject, IReadOnlyCollection<Compartment> compartments, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the rights of a person in a compartment, by operation identity; empty removes them all.</summary>
-    Task ReplaceUserGrantsAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Replaces the rights of a person in a compartment, each with whether it requires a second factor; empty removes
+    /// them all. An operation given twice requires a second factor when either says so.
+    /// </summary>
+    Task ReplaceUserGrantsAsync(string subject, Compartment compartment, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the rights of a person in the shared space — what makes them an operator of the platform; empty removes them all.</summary>
-    Task ReplaceAdminGrantsAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Replaces the rights of a person in the shared space — what makes them an operator of the platform —, each with
+    /// whether it requires a second factor; empty removes them all.
+    /// </summary>
+    Task ReplaceAdminGrantsAsync(string subject, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default);
 
-    /// <summary>Replaces the rights of a client in a space; empty removes them all, and the client is no longer admitted there.</summary>
+    /// <summary>
+    /// Replaces the rights of a client in a space; empty removes them all, and the client is no longer admitted there.
+    /// A client has no second factor: its rights are operations.
+    /// </summary>
     Task ReplaceClientGrantsAsync(string clientId, Space space, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default);
 
     /// <summary>Removes every membership and every right granted in the compartment, once it is terminated.</summary>
@@ -48,18 +57,18 @@ internal sealed class AccessProjection(
         await publisher.PublishAsync(new MembershipsChangedEvent { OccurredAt = time.GetUtcNow(), Subject = subject }, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task ReplaceUserGrantsAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default)
+    public async Task ReplaceUserGrantsAsync(string subject, Compartment compartment, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default)
     {
         Guard.NotWhiteSpace(subject);
         Guard.NotNull(compartment);
-        await userGrants.ReplaceAsync(subject, compartment, Identities(operations), cancellationToken).ConfigureAwait(false);
+        await userGrants.ReplaceAsync(subject, compartment, Grants(grants), cancellationToken).ConfigureAwait(false);
         await publisher.PublishAsync(new GrantsChangedEvent { OccurredAt = time.GetUtcNow(), Subject = AccessSubject.Person(subject), Compartment = compartment }, cancellationToken).ConfigureAwait(false);
     }
 
-    public async Task ReplaceAdminGrantsAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken = default)
+    public async Task ReplaceAdminGrantsAsync(string subject, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken = default)
     {
         Guard.NotWhiteSpace(subject);
-        await adminGrants.ReplaceAsync(subject, Identities(operations), cancellationToken).ConfigureAwait(false);
+        await adminGrants.ReplaceAsync(subject, Grants(grants), cancellationToken).ConfigureAwait(false);
         await publisher.PublishAsync(new GrantsChangedEvent { OccurredAt = time.GetUtcNow(), Subject = AccessSubject.Person(subject), Compartment = null }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -106,6 +115,15 @@ internal sealed class AccessProjection(
         foreach (var operation in operations)
             Guard.Satisfies(operation, OperationIdentities.IsIdentity, $"'{operation}' is not an operation identity: {OperationIdentities.Rule}.");
         return operations;
+    }
+
+    /// <summary>The grants checked as <see cref="Identities"/> checks their operations, one per operation, the stricter requirement kept.</summary>
+    private static IReadOnlyList<AccessGrant> Grants(IReadOnlyCollection<AccessGrant> grants)
+    {
+        Guard.NotNull(grants);
+        foreach (var grant in grants)
+            Guard.Satisfies(Guard.NotNull(grant).Operation, OperationIdentities.IsIdentity, $"'{grant.Operation}' is not an operation identity: {OperationIdentities.Rule}.");
+        return AccessGrant.Merge(grants);
     }
 }
 

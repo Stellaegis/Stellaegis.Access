@@ -80,7 +80,7 @@ public sealed class ClientTests
         Assert.Equal(HttpStatusCode.Forbidden, (await inventory.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
         await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+        await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
         Assert.Equal(new WebTestHost.Seen(Jane, null, "acme"), await inventory.AsPerson(Jane).GetFromJsonAsync<WebTestHost.Seen>("/api/orgs/acme/items", Ct));
 
         // A client, and a person through a client, take their own routes of the decision.
@@ -91,7 +91,7 @@ public sealed class ClientTests
 
         // The refusal carries the code of Access, read on the client side.
         var decision = inventory.Services.CreateScope().ServiceProvider.GetRequiredService<IAccessDecision>();
-        var refused = await decision.DecideAsync(JaneActor, Globex, ItemsRead, Ct);
+        var refused = await decision.DecideAsync(JaneActor, Globex, ItemsRead, secondFactor: false, Ct);
         Assert.True(refused.IsFailure);
         Assert.Equal(AccessErrors.NotMemberCode, refused.Error!.Code);
     }
@@ -107,29 +107,29 @@ public sealed class ClientTests
         Assert.True(cache.Enabled);
 
         await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-        await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+        await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
         Assert.Equal(HttpStatusCode.OK, (await inventory.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
-        Assert.True(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead));
+        Assert.True(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
 
         // The right is withdrawn in Access; the inventory still holds the yes, until it hears of it.
         await projection.ReplaceUserGrantsAsync(Jane, Acme, [], Ct);
         Assert.Equal(HttpStatusCode.OK, (await inventory.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
         cache.Invalidate(new GrantsChangedEvent { OccurredAt = DateTimeOffset.UtcNow, Subject = AccessSubject.Person(Jane), Compartment = Acme });
-        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead));
+        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
         Assert.Equal(HttpStatusCode.Forbidden, (await inventory.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
         // A refusal is never kept: granted again, seen at once.
-        await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+        await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
         Assert.Equal(HttpStatusCode.OK, (await inventory.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
         // The compartment removed drops every decision in it; a via is a subject of the entry too.
-        cache.SetYes(AccessSubject.Person(Jane), AccessSubject.Client(Desktop), Acme, ItemsRead);
+        cache.SetYes(AccessSubject.Person(Jane), AccessSubject.Client(Desktop), Acme, ItemsRead, secondFactor: false);
         cache.Invalidate(new SubjectRemovedEvent { OccurredAt = DateTimeOffset.UtcNow, Subject = AccessSubject.Client(Desktop) });
-        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), AccessSubject.Client(Desktop), Acme, ItemsRead));
-        Assert.True(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead));
+        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), AccessSubject.Client(Desktop), Acme, ItemsRead, secondFactor: false));
+        Assert.True(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
         cache.Invalidate(new CompartmentRemovedEvent { OccurredAt = DateTimeOffset.UtcNow, Compartment = Acme });
-        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead));
+        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
     }
 
     [Fact]
@@ -140,9 +140,9 @@ public sealed class ClientTests
         Assert.Null(new AccessCacheOptions().FindError());
 
         using var disabled = new AccessDecisionCache(Options.Create(new AccessCacheOptions { Enabled = false }));
-        disabled.SetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead);
+        disabled.SetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false);
         Assert.False(disabled.Enabled);
-        Assert.False(disabled.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead));
+        Assert.False(disabled.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
     }
 
     [Fact]
@@ -155,5 +155,28 @@ public sealed class ClientTests
         var app = builder.Build();
 
         await Assert.ThrowsAsync<OptionsValidationException>(() => app.StartAsync(Ct));
+    }
+
+    [Fact]
+    public async Task Over_HTTP_the_question_carries_the_second_factor_and_the_cache_keeps_it_apart()
+    {
+        await using var access = await StartAccessAsync();
+        await using var inventory = await StartInventoryAsync(access);
+        using var scope = access.Services.CreateScope();
+        var projection = scope.ServiceProvider.GetRequiredService<IAccessProjection>();
+        var cache = inventory.Services.GetRequiredService<AccessDecisionCache>();
+        await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
+        await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity, RequiresSecondFactor: true)], Ct);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await inventory.AsPerson(Jane, amr: "pwd").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await inventory.AsPerson(Jane, amr: "pwd,otp,mfa").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+
+        // The yes given to the session that proved a second factor never answers one that did not.
+        Assert.True(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: true));
+        Assert.False(cache.TryGetYes(AccessSubject.Person(Jane), null, Acme, ItemsRead, secondFactor: false));
+        Assert.Equal(HttpStatusCode.Forbidden, (await inventory.AsPerson(Jane, amr: "pwd").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+
+        var refused = await inventory.Services.CreateScope().ServiceProvider.GetRequiredService<IAccessDecision>().DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct);
+        Assert.Equal(AccessErrors.SecondFactorRequiredCode, refused.Error!.Code);
     }
 }

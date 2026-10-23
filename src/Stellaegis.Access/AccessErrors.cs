@@ -18,6 +18,9 @@ public static class AccessErrors
     /// <summary>The code of <see cref="ViaDenied"/>: the actor holds the operation, but the client acting on its behalf does not.</summary>
     public const string ViaDeniedCode = "Access.ViaDenied";
 
+    /// <summary>The code of <see cref="SecondFactorRequired"/>: the actor holds the operation, which requires a second factor the session did not prove.</summary>
+    public const string SecondFactorRequiredCode = "Access.SecondFactorRequired";
+
     /// <summary>
     /// The actor is not admitted in the space: a person without a membership of the compartment, a person without any
     /// right in the shared space, a client without any right in the space. The first step of a decision, which fails
@@ -33,4 +36,11 @@ public static class AccessErrors
     /// in the space: the rights of a person are restricted by those of the client acting for them, never widened.
     /// </summary>
     public static Error ViaDenied { get; } = Error.Forbidden(ViaDeniedCode, "The client acting on your behalf is not allowed to perform this operation.");
+
+    /// <summary>
+    /// The actor holds the operation, which requires a second factor, and the session did not prove one: signing in
+    /// again with a second factor opens it. Said only to whoever holds the operation — to anyone else, the refusal is
+    /// <see cref="Denied"/>.
+    /// </summary>
+    public static Error SecondFactorRequired { get; } = Error.Forbidden(SecondFactorRequiredCode, "This operation requires a session opened with a second factor.");
 }

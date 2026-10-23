@@ -36,7 +36,7 @@ public sealed class PoliciesTests
             await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
             Assert.Equal(HttpStatusCode.Forbidden, (await jane.GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
-            await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity], Ct);
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity)], Ct);
             var seen = await jane.GetFromJsonAsync<WebTestHost.Seen>("/api/orgs/acme/items", Ct);
             Assert.Equal(new WebTestHost.Seen(Jane, null, "acme"), seen);
 
@@ -70,7 +70,7 @@ public sealed class PoliciesTests
         using (scope)
         {
             await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-            await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsRead.Identity, ItemsWrite.Identity], Ct);
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity), new(ItemsWrite.Identity)], Ct);
             await projection.ReplaceClientGrantsAsync(Desktop, Acme, [ItemsRead.Identity], Ct);
             var janeViaDesktop = app.AsPerson(Jane, via: Desktop);
 
@@ -95,10 +95,10 @@ public sealed class PoliciesTests
 
             // A right in a compartment opens nothing in the shared space.
             await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-            await projection.ReplaceUserGrantsAsync(Jane, Acme, [ToolsModule.Read.Identity], Ct);
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ToolsModule.Read.Identity)], Ct);
             Assert.Equal(HttpStatusCode.Forbidden, (await jane.GetAsync("/api/tools", Ct)).StatusCode);
 
-            await projection.ReplaceAdminGrantsAsync(Jane, [ToolsModule.Read.Identity], Ct);
+            await projection.ReplaceAdminGrantsAsync(Jane, [new(ToolsModule.Read.Identity)], Ct);
             Assert.Equal(HttpStatusCode.OK, (await jane.GetAsync("/api/tools", Ct)).StatusCode);
 
             // A client of the platform, with its right in the shared space.
@@ -117,10 +117,10 @@ public sealed class PoliciesTests
         {
             // A member of acme holding the purge in acme does not purge acme: the purge is an act of administration.
             await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
-            await projection.ReplaceUserGrantsAsync(Jane, Acme, [ItemsModule.Purge.Identity], Ct);
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsModule.Purge.Identity)], Ct);
             Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane).DeleteAsync("/api/admin/items/compartments/acme", Ct)).StatusCode);
 
-            await projection.ReplaceAdminGrantsAsync(Jane, [ItemsModule.Purge.Identity], Ct);
+            await projection.ReplaceAdminGrantsAsync(Jane, [new(ItemsModule.Purge.Identity)], Ct);
             var seen = await (await app.AsPerson(Jane).DeleteAsync("/api/admin/items/compartments/acme", Ct)).Content.ReadFromJsonAsync<WebTestHost.Seen>(Ct);
             Assert.Equal(new WebTestHost.Seen(Jane, null, "acme"), seen);
         }
@@ -135,7 +135,7 @@ public sealed class PoliciesTests
         {
             Assert.Equal(HttpStatusCode.Unauthorized, (await app.GetTestClient().GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
 
-            await projection.ReplaceAdminGrantsAsync(Jane, [ItemsRead.Identity], Ct);
+            await projection.ReplaceAdminGrantsAsync(Jane, [new(ItemsRead.Identity)], Ct);
             Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane).GetAsync("/api/orgs/Not-A-Compartment/items", Ct)).StatusCode);
         }
     }
@@ -167,7 +167,7 @@ public sealed class PoliciesTests
         using (scope)
         {
             Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane).GetAsync("/api/by-hand", Ct)).StatusCode);
-            await projection.ReplaceAdminGrantsAsync(Jane, [ToolsModule.Read.Identity], Ct);
+            await projection.ReplaceAdminGrantsAsync(Jane, [new(ToolsModule.Read.Identity)], Ct);
             Assert.Equal(HttpStatusCode.OK, (await app.AsPerson(Jane).GetAsync("/api/by-hand", Ct)).StatusCode);
         }
     }
@@ -178,5 +178,23 @@ public sealed class PoliciesTests
         Assert.Throws<ArgumentException>(() => new AccessRequirement("Items.Read"));
         Assert.Throws<ArgumentException>(() => new AccessRequirement("items"));
         Assert.Equal("items.read", new AccessRequirement("items.read").ToString());
+    }
+
+    [Fact]
+    public async Task A_right_that_requires_a_second_factor_opens_to_a_session_whose_amr_holds_mfa()
+    {
+        await using var app = await WebTestHost.StartAsync(ct: Ct);
+        var projection = ProjectionOf(app, out var scope);
+        using (scope)
+        {
+            await projection.ReplaceMembershipsAsync(Jane, [Acme], Ct);
+            await projection.ReplaceUserGrantsAsync(Jane, Acme, [new(ItemsRead.Identity, RequiresSecondFactor: true)], Ct);
+
+            Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane).GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane, amr: "pwd").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson(Jane, amr: "pwd,otp").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await app.AsPerson(Jane, amr: "pwd,otp,mfa").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await app.AsPerson(Jane, amr: "pwd,mfa", amrClaim: "http://schemas.microsoft.com/claims/authnmethodsreferences").GetAsync("/api/orgs/acme/items", Ct)).StatusCode);
+        }
     }
 }

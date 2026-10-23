@@ -87,33 +87,36 @@ internal sealed class PostgreSqlAccessStore
 
     // ── Rights of persons in a compartment ───────────────────────────────────
 
-    async Task<bool> IUserGrantStore.HoldsAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken)
+    async Task<AccessGrant?> IUserGrantStore.FindAsync(string subject, Compartment compartment, string operation, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
         Guard.NotNull(compartment);
         Guard.NotWhiteSpace(operation);
         await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await uow.Repo<UserGrantRepository>().HoldsAsync(subject, compartment.Value, operation, cancellationToken).ConfigureAwait(false);
+        return (await uow.Repo<UserGrantRepository>().FindAsync(subject, compartment.Value, operation, cancellationToken).ConfigureAwait(false))?.ToGrant();
     }
 
-    async Task<IReadOnlyList<string>> IUserGrantStore.ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken)
+    async Task<IReadOnlyList<AccessGrant>> IUserGrantStore.ListAsync(string subject, Compartment compartment, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
         Guard.NotNull(compartment);
         await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await uow.Repo<UserGrantRepository>().ListAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
+        return (await uow.Repo<UserGrantRepository>().ListAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false)).Select(row => row.ToGrant()).ToList();
     }
 
-    async Task IUserGrantStore.ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<string> operations, CancellationToken cancellationToken)
+    async Task IUserGrantStore.ReplaceAsync(string subject, Compartment compartment, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
         Guard.NotNull(compartment);
-        Guard.NotNull(operations);
+        Guard.NotNull(grants);
         await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
-        var grants = uow.Repo<UserGrantRepository>();
-        await grants.DeleteAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
-        if (operations.Count > 0)
-            await grants.InsertAsync(subject, compartment.Value, Distinct(operations), cancellationToken).ConfigureAwait(false);
+        var rows = uow.Repo<UserGrantRepository>();
+        await rows.DeleteAsync(subject, compartment.Value, cancellationToken).ConfigureAwait(false);
+        if (grants.Count > 0)
+        {
+            var (operations, requires) = Columns(grants);
+            await rows.InsertAsync(subject, compartment.Value, operations, requires, cancellationToken).ConfigureAwait(false);
+        }
         await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -133,12 +136,12 @@ internal sealed class PostgreSqlAccessStore
 
     // ── Rights of the operators of the platform ──────────────────────────────
 
-    async Task<bool> IAdminGrantStore.HoldsAsync(string subject, string operation, CancellationToken cancellationToken)
+    async Task<AccessGrant?> IAdminGrantStore.FindAsync(string subject, string operation, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
         Guard.NotWhiteSpace(operation);
         await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await uow.Repo<AdminGrantRepository>().HoldsAsync(subject, operation, cancellationToken).ConfigureAwait(false);
+        return (await uow.Repo<AdminGrantRepository>().FindAsync(subject, operation, cancellationToken).ConfigureAwait(false))?.ToGrant();
     }
 
     async Task<bool> IAdminGrantStore.HasAnyAsync(string subject, CancellationToken cancellationToken)
@@ -148,22 +151,25 @@ internal sealed class PostgreSqlAccessStore
         return await uow.Repo<AdminGrantRepository>().HasAnyAsync(subject, cancellationToken).ConfigureAwait(false);
     }
 
-    async Task<IReadOnlyList<string>> IAdminGrantStore.ListAsync(string subject, CancellationToken cancellationToken)
+    async Task<IReadOnlyList<AccessGrant>> IAdminGrantStore.ListAsync(string subject, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
         await using var uow = await _units.OpenAsync(cancellationToken).ConfigureAwait(false);
-        return await uow.Repo<AdminGrantRepository>().ListAsync(subject, cancellationToken).ConfigureAwait(false);
+        return (await uow.Repo<AdminGrantRepository>().ListAsync(subject, cancellationToken).ConfigureAwait(false)).Select(row => row.ToGrant()).ToList();
     }
 
-    async Task IAdminGrantStore.ReplaceAsync(string subject, IReadOnlyCollection<string> operations, CancellationToken cancellationToken)
+    async Task IAdminGrantStore.ReplaceAsync(string subject, IReadOnlyCollection<AccessGrant> grants, CancellationToken cancellationToken)
     {
         Guard.NotWhiteSpace(subject);
-        Guard.NotNull(operations);
+        Guard.NotNull(grants);
         await using var uow = await _units.OpenAndBeginAsync(cancellationToken).ConfigureAwait(false);
-        var grants = uow.Repo<AdminGrantRepository>();
-        await grants.DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
-        if (operations.Count > 0)
-            await grants.InsertAsync(subject, Distinct(operations), cancellationToken).ConfigureAwait(false);
+        var rows = uow.Repo<AdminGrantRepository>();
+        await rows.DeleteBySubjectAsync(subject, cancellationToken).ConfigureAwait(false);
+        if (grants.Count > 0)
+        {
+            var (operations, requires) = Columns(grants);
+            await rows.InsertAsync(subject, operations, requires, cancellationToken).ConfigureAwait(false);
+        }
         await uow.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -231,6 +237,13 @@ internal sealed class PostgreSqlAccessStore
     /// <summary>The operations once each: a snapshot that names one twice would violate the key, not the meaning.</summary>
     private static string[] Distinct(IReadOnlyCollection<string> operations)
         => operations.Distinct(StringComparer.Ordinal).ToArray();
+
+    // One row per operation, the stricter requirement kept, as two columns for unnest.
+    private static (string[] Operations, bool[] Requires) Columns(IReadOnlyCollection<AccessGrant> grants)
+    {
+        var merged = AccessGrant.Merge(grants);
+        return (merged.Select(grant => grant.Operation).ToArray(), merged.Select(grant => grant.RequiresSecondFactor).ToArray());
+    }
 
     /// <inheritdoc/>
     public ValueTask DisposeAsync() => _dataSource.DisposeAsync();

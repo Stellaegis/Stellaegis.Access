@@ -79,6 +79,11 @@ internal sealed class AccessPolicyProvider(IOptions<AuthorizationOptions> option
 /// acting on the actor's behalf is the <see cref="Actor.Via"/> of the context, or the <c>act</c> claim of a token
 /// exchange when the context has none.
 /// </para>
+/// <para>
+/// <b>The second factor.</b> The session proved one when the <c>amr</c> of the principal holds <c>mfa</c> (RFC 8176)
+/// — under its name, or the one ASP.NET Core maps it to when it maps inbound claims. A right that requires one is
+/// refused without it, with <see cref="AccessErrors.SecondFactorRequired"/>.
+/// </para>
 /// </remarks>
 internal sealed class AccessRequirementHandler(
     IAccessDecision decision,
@@ -104,7 +109,7 @@ internal sealed class AccessRequirementHandler(
         var operation = http.GetOperation() is { } labelled && labelled.Identity == requirement.Operation
             ? labelled
             : OperationOf(requirement.Operation);
-        var result = await decision.DecideAsync(request.Subject, request.Via, request.Space, operation, http.RequestAborted).ConfigureAwait(false);
+        var result = await decision.DecideAsync(request.Subject, request.Via, request.Space, operation, request.SecondFactor, http.RequestAborted).ConfigureAwait(false);
         if (result.IsSuccess)
             context.Succeed(requirement);
         else
@@ -120,13 +125,17 @@ internal sealed class AccessRequirementHandler(
     }
 }
 
-/// <summary>What a decision needs from a request: who, through whom, where.</summary>
-internal sealed record DecisionRequest(AccessSubject Subject, AccessSubject? Via, Space Space);
+/// <summary>What a decision needs from a request: who, through whom, where, and whether the session proved a second factor.</summary>
+internal sealed record DecisionRequest(AccessSubject Subject, AccessSubject? Via, Space Space, bool SecondFactor);
 
 /// <summary>Reads the subject, the client acting on its behalf and the space of a request.</summary>
 internal static class Callers
 {
     private const string ActClaim = "act";
+
+    // amr as the token names it, or as ASP.NET Core maps it when it maps inbound claims; mfa says a second factor (RFC 8176).
+    private static readonly string[] MethodClaims = ["amr", "http://schemas.microsoft.com/claims/authnmethodsreferences"];
+    private const string MultipleFactors = "mfa";
 
     /// <summary>
     /// The decision request of an authenticated principal, or <see langword="null"/> when the compartment of the
@@ -139,7 +148,7 @@ internal static class Callers
         if (!readsContext)
         {
             var (subject, via) = FromPrincipal(http.User);
-            return new DecisionRequest(subject, via, Space.Shared);
+            return new DecisionRequest(subject, via, Space.Shared, SecondFactorOf(http.User));
         }
 
         var context = http.RequestServices.GetRequiredService<IRequestContext>();
@@ -147,8 +156,12 @@ internal static class Callers
         var kind = IsClient(http.User, actor) ? SubjectKind.Client : SubjectKind.Person;
         var actorVia = actor.Via is { } v ? AccessSubject.Client(v.Value) : ViaOf(http.User);
         var space = SpaceOf(context);
-        return space is null ? null : new DecisionRequest(new AccessSubject(kind, actor.Value), actorVia, space);
+        return space is null ? null : new DecisionRequest(new AccessSubject(kind, actor.Value), actorVia, space, SecondFactorOf(http.User));
     }
+
+    /// <summary>Whether the session of the principal proved a second factor: an <c>amr</c> holding <c>mfa</c>.</summary>
+    public static bool SecondFactorOf(ClaimsPrincipal user)
+        => MethodClaims.SelectMany(user.FindAll).Any(claim => string.Equals(claim.Value, MultipleFactors, StringComparison.Ordinal));
 
     // On a route acting on spaces, the context's space fails by design (the route reads its object itself): the
     // decision is then taken in the shared space. The metadata that marks such a route is internal to Primitives,

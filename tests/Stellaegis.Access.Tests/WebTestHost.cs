@@ -108,12 +108,18 @@ internal static class WebTestHost
         return app;
     }
 
-    public static HttpClient AsPerson(this WebApplication app, string subject, string? via = null)
+    /// <summary>A client for a person, through a client when <paramref name="via"/> names one, the session proving the methods of <paramref name="amr"/>.</summary>
+    public static HttpClient AsPerson(this WebApplication app, string subject, string? via = null, string? amr = null, string amrClaim = "amr")
     {
         var client = app.GetTestClient();
         client.DefaultRequestHeaders.Add(HeaderAuthentication.PersonHeader, subject);
         if (via is not null)
             client.DefaultRequestHeaders.Add(HeaderAuthentication.ViaHeader, via);
+        if (amr is not null)
+        {
+            client.DefaultRequestHeaders.Add(HeaderAuthentication.AmrHeader, amr);
+            client.DefaultRequestHeaders.Add(HeaderAuthentication.AmrClaimHeader, amrClaim);
+        }
         return client;
     }
 
@@ -139,6 +145,8 @@ internal static class WebTestHost
         public const string PersonHeader = "X-Person";
         public const string ClientHeader = "X-Client";
         public const string ViaHeader = "X-Via";
+        public const string AmrHeader = "X-Amr";
+        public const string AmrClaimHeader = "X-Amr-Claim";
 
         protected override Task<AuthenticateResult> HandleAuthenticateAsync()
         {
@@ -153,6 +161,9 @@ internal static class WebTestHost
                 return Task.FromResult(AuthenticateResult.NoResult());
             if (Request.Headers.TryGetValue(ViaHeader, out var via))
                 claims.Add(new Claim("act", via.ToString()));
+            // The methods the session proved, one claim each, under the name a token gives them or the one ASP.NET Core maps it to.
+            if (Request.Headers.TryGetValue(AmrHeader, out var amr))
+                claims.AddRange(amr.ToString().Split(',').Select(method => new Claim(Request.Headers[AmrClaimHeader].ToString(), method)));
             var identity = new ClaimsIdentity(claims, SchemeName);
             return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
         }

@@ -55,9 +55,10 @@ create index ix_memberships_compartment on authz.memberships (compartment);
 -- (subject, compartment, operation), no other index needed to answer "does she hold it there?".
 
 create table authz.user_grants (
-  subject      varchar(128) not null,
-  compartment  varchar(63)  not null,
-  operation    varchar(127) not null,
+  subject                 varchar(128) not null,
+  compartment             varchar(63)  not null,
+  operation               varchar(127) not null,
+  requires_second_factor  boolean      not null,
 
   constraint pk_user_grants primary key (subject, compartment, operation),
   constraint ck_user_grants_subject check (
@@ -70,6 +71,7 @@ create table authz.user_grants (
 
 comment on table  authz.user_grants           is 'The rights of persons in a compartment, projected by the registry from its roles. One row per (subject, compartment, operation).';
 comment on column authz.user_grants.operation is 'The identity of the operation, target.name, as the module declares it.';
+comment on column authz.user_grants.requires_second_factor is 'Whether the decision refuses the right to a session that did not prove a second factor: the operation''s, as the registry projects it.';
 
 -- A terminated compartment takes its rights with it.
 create index ix_user_grants_compartment on authz.user_grants (compartment);
@@ -80,8 +82,9 @@ create index ix_user_grants_compartment on authz.user_grants (compartment);
 -- compartment.
 
 create table authz.admin_grants (
-  subject      varchar(128) not null,
-  operation    varchar(127) not null,
+  subject                 varchar(128) not null,
+  operation               varchar(127) not null,
+  requires_second_factor  boolean      not null,
 
   constraint pk_admin_grants primary key (subject, operation),
   constraint ck_admin_grants_subject check (

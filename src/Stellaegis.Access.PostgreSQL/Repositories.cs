@@ -41,26 +41,26 @@ internal sealed class MembershipRepository(DbConnection connection, Func<DbTrans
 /// <summary>The rows of <c>authz.user_grants</c>: the rights of persons in a compartment.</summary>
 internal sealed class UserGrantRepository(DbConnection connection, Func<DbTransaction?> transaction)
 {
-    public Task<bool> HoldsAsync(string subject, string compartment, string operation, CancellationToken cancellationToken)
-        => connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-            "select exists (select 1 from authz.user_grants where subject = @subject and compartment = @compartment and operation = @operation)",
+    public Task<GrantRow?> FindAsync(string subject, string compartment, string operation, CancellationToken cancellationToken)
+        => connection.QuerySingleOrDefaultAsync<GrantRow?>(new CommandDefinition(
+            "select operation as Operation, requires_second_factor as RequiresSecondFactor from authz.user_grants where subject = @subject and compartment = @compartment and operation = @operation",
             new { subject, compartment, operation }, transaction(), cancellationToken: cancellationToken));
 
-    public async Task<IReadOnlyList<string>> ListAsync(string subject, string compartment, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GrantRow>> ListAsync(string subject, string compartment, CancellationToken cancellationToken)
     {
-        var rows = await connection.QueryAsync<string>(new CommandDefinition(
-            "select operation from authz.user_grants where subject = @subject and compartment = @compartment order by operation",
+        var rows = await connection.QueryAsync<GrantRow>(new CommandDefinition(
+            "select operation as Operation, requires_second_factor as RequiresSecondFactor from authz.user_grants where subject = @subject and compartment = @compartment order by operation",
             new { subject, compartment }, transaction(), cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows.ToList();
     }
 
-    public Task InsertAsync(string subject, string compartment, string[] operations, CancellationToken cancellationToken)
+    public Task InsertAsync(string subject, string compartment, string[] operations, bool[] requires, CancellationToken cancellationToken)
         => connection.ExecuteAsync(new CommandDefinition(
             """
-            insert into authz.user_grants (subject, compartment, operation)
-            select @subject, @compartment, unnest(@operations)
+            insert into authz.user_grants (subject, compartment, operation, requires_second_factor)
+            select @subject, @compartment, g.operation, g.requires from unnest(@operations, @requires) as g (operation, requires)
             """,
-            new { subject, compartment, operations }, transaction(), cancellationToken: cancellationToken));
+            new { subject, compartment, operations, requires }, transaction(), cancellationToken: cancellationToken));
 
     public Task DeleteAsync(string subject, string compartment, CancellationToken cancellationToken)
         => connection.ExecuteAsync(new CommandDefinition(
@@ -81,9 +81,9 @@ internal sealed class UserGrantRepository(DbConnection connection, Func<DbTransa
 /// <summary>The rows of <c>authz.admin_grants</c>: the rights of the operators of the platform, in the shared space.</summary>
 internal sealed class AdminGrantRepository(DbConnection connection, Func<DbTransaction?> transaction)
 {
-    public Task<bool> HoldsAsync(string subject, string operation, CancellationToken cancellationToken)
-        => connection.ExecuteScalarAsync<bool>(new CommandDefinition(
-            "select exists (select 1 from authz.admin_grants where subject = @subject and operation = @operation)",
+    public Task<GrantRow?> FindAsync(string subject, string operation, CancellationToken cancellationToken)
+        => connection.QuerySingleOrDefaultAsync<GrantRow?>(new CommandDefinition(
+            "select operation as Operation, requires_second_factor as RequiresSecondFactor from authz.admin_grants where subject = @subject and operation = @operation",
             new { subject, operation }, transaction(), cancellationToken: cancellationToken));
 
     public Task<bool> HasAnyAsync(string subject, CancellationToken cancellationToken)
@@ -91,21 +91,21 @@ internal sealed class AdminGrantRepository(DbConnection connection, Func<DbTrans
             "select exists (select 1 from authz.admin_grants where subject = @subject)",
             new { subject }, transaction(), cancellationToken: cancellationToken));
 
-    public async Task<IReadOnlyList<string>> ListAsync(string subject, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<GrantRow>> ListAsync(string subject, CancellationToken cancellationToken)
     {
-        var rows = await connection.QueryAsync<string>(new CommandDefinition(
-            "select operation from authz.admin_grants where subject = @subject order by operation",
+        var rows = await connection.QueryAsync<GrantRow>(new CommandDefinition(
+            "select operation as Operation, requires_second_factor as RequiresSecondFactor from authz.admin_grants where subject = @subject order by operation",
             new { subject }, transaction(), cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows.ToList();
     }
 
-    public Task InsertAsync(string subject, string[] operations, CancellationToken cancellationToken)
+    public Task InsertAsync(string subject, string[] operations, bool[] requires, CancellationToken cancellationToken)
         => connection.ExecuteAsync(new CommandDefinition(
             """
-            insert into authz.admin_grants (subject, operation)
-            select @subject, unnest(@operations)
+            insert into authz.admin_grants (subject, operation, requires_second_factor)
+            select @subject, g.operation, g.requires from unnest(@operations, @requires) as g (operation, requires)
             """,
-            new { subject, operations }, transaction(), cancellationToken: cancellationToken));
+            new { subject, operations, requires }, transaction(), cancellationToken: cancellationToken));
 
     public Task DeleteBySubjectAsync(string subject, CancellationToken cancellationToken)
         => connection.ExecuteAsync(new CommandDefinition(
@@ -156,4 +156,10 @@ internal sealed class ClientGrantRepository(DbConnection connection, Func<DbTran
         => connection.ExecuteAsync(new CommandDefinition(
             "delete from authz.client_grants where space = @space",
             new { space }, transaction(), cancellationToken: cancellationToken));
+}
+
+/// <summary>A row of <c>authz.user_grants</c> or <c>authz.admin_grants</c>, as the decision reads it.</summary>
+internal sealed record GrantRow(string Operation, bool RequiresSecondFactor)
+{
+    public AccessGrant ToGrant() => new(Operation, RequiresSecondFactor);
 }

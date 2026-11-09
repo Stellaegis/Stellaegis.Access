@@ -171,7 +171,8 @@ internal static class Callers
 
     /// <summary>
     /// The decision request of an authenticated principal, or <see langword="null"/> when the compartment of the
-    /// request cannot be resolved — the endpoint would answer 404; the decision is left unmet, which refuses.
+    /// request cannot be resolved — the endpoint would answer 404 —, or when the token names an actor no token may
+    /// name, <c>job:…</c> (<see cref="Actor.TryParseClaim"/>): the decision is left unmet, which refuses.
     /// </summary>
     public static DecisionRequest? Read(HttpContext http)
     {
@@ -179,8 +180,9 @@ internal static class Callers
         var readsContext = endpoint?.Metadata.GetMetadata<RequiresRequestContextAttribute>() is not null;
         if (!readsContext)
         {
-            var (subject, via) = FromPrincipal(http.User);
-            return new DecisionRequest(subject, via, Space.Shared, SecondFactorOf(http.User));
+            return FromPrincipal(http.User) is var (subject, via) && subject is not null
+                ? new DecisionRequest(subject, via, Space.Shared, SecondFactorOf(http.User))
+                : null;
         }
 
         var context = http.RequestServices.GetRequiredService<IRequestContext>();
@@ -210,15 +212,17 @@ internal static class Callers
         }
     }
 
-    private static (AccessSubject Subject, AccessSubject? Via) FromPrincipal(ClaimsPrincipal user)
+    // The subject read from the claims of a route that reads no request context — as the request context reads its
+    // actor, by Actor.TryParseClaim: a token naming a job names no subject, and is refused.
+    private static (AccessSubject? Subject, AccessSubject? Via) FromPrincipal(ClaimsPrincipal user)
     {
         if (user.FindFirst("client_id")?.Value is { } clientId && (user.FindFirst("sub") is null && user.FindFirst(ClaimTypes.NameIdentifier) is null))
-            return (AccessSubject.Client(clientId), ViaOf(user));
+            return (Actor.TryParseClaim(clientId, out _) ? AccessSubject.Client(clientId) : null, ViaOf(user));
         var subject = user.FindFirst("sub")?.Value ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
             ?? throw new InvalidOperationException(
                 "The authenticated user carries none of the claims a subject is read from: sub, NameIdentifier, client_id. "
                 + "Map the claim the token carries onto one of them.");
-        return (AccessSubject.Person(subject), ViaOf(user));
+        return (Actor.TryParseClaim(subject, out _) ? AccessSubject.Person(subject) : null, ViaOf(user));
     }
 
     // A principal is a client when it names a client_id and no person: a token of a client acting for a person

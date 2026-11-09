@@ -109,6 +109,21 @@ public sealed class PoliciesTests
     }
 
     [Fact]
+    public async Task A_token_naming_a_job_is_refused_on_a_route_without_a_request_context()
+    {
+        await using var app = await WebTestHost.StartAsync(ct: Ct);
+        var projection = ProjectionOf(app, out var scope);
+        using (scope)
+        {
+            // Only the code writes job:… — a token naming one is refused, whatever was projected for it.
+            await projection.ReplaceAdminGrantsAsync("job:install", [new(ToolsModule.Read.Identity)], Ct);
+            await projection.ReplaceClientGrantsAsync("job:install", Space.Shared, [ToolsModule.Read.Identity], Ct);
+            Assert.Equal(HttpStatusCode.Forbidden, (await app.AsPerson("job:install").GetAsync("/api/tools", Ct)).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await app.AsClient("job:install").GetAsync("/api/tools", Ct)).StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task A_route_acting_on_spaces_is_decided_in_the_shared_space_not_in_the_compartment_it_names()
     {
         await using var app = await WebTestHost.StartAsync(ct: Ct);

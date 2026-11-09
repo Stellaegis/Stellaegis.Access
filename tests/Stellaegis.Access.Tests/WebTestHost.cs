@@ -73,7 +73,7 @@ internal static class WebTestHost
         if (http.User.Identity?.IsAuthenticated != true)
             return null;
         var value = http.User.FindFirst("sub")?.Value ?? http.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? http.User.FindFirst("client_id")?.Value;
-        return value is null ? null : Actor.Parse(value);
+        return Actor.TryParseClaim(value, out var actor) ? actor : null;   // a token naming job:… names nobody, and fails the request
     }
 
     /// <summary>The host started with the routes of the two test modules and those of Access, one policy per operation.</summary>

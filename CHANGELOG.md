@@ -7,6 +7,35 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [6.1.0] — 2026-11-09
+
+On `Stellaegis.Primitives` 5.6.0. Its startup refuses a host it used to let through badly assembled, and it reads a
+401 or a 403 of an internal call as a failure — which the client took for the answer of Access. A resource server
+on Primitives 5.6.0 and `Stellaegis.Access.Client` 6.0.0 answers 500 to every person Access refuses: take this
+version.
+
+### Fixed
+
+- **The client relays only a decision.** `HttpAccessDecision` read every problem details as the refusal of the
+  person: on Primitives 5.6.0 a refusal of Access became a failure, and the resource server answered 500 instead of
+  403; and a 401 of the client's own token reached the person as a refusal. A 204 is a yes, a 403 carrying a code of
+  `AccessErrors` is the refusal, given back as that error; anything else — a 401, a 403 without such a code, a
+  question found malformed, a success that is not the 204 — throws `HttpRequestException`.
+- **A subject read from a token is never a job.** On a route that reads no request context, the policies took the
+  subject from `sub` or `client_id` as it was: a token naming `job:install` was decided as that subject. They read it
+  with `Actor.TryParseClaim` now, and a token naming a job is refused.
+
+### Changed
+
+- **`Stellaegis.Primitives` 5.6.0 and the 10.0.14 runtime.**
+
+### Updating from 6.0.0
+
+Take the version — on a resource server apart, before Primitives 5.6.0 reaches it. A host meets what the startup of
+Primitives 5.6.0 now refuses, listed with its way out in the CHANGELOG of Primitives, § *Updating from 5.5.0*. A host
+whose own actor source reads a claim reads it with `Actor.TryParseClaim`, as the example does. A client calling Access
+in plain http to another machine declares `AllowPlainHttp`.
+
 ## [6.0.0] — 2026-10-23
 
 The second factor at the decision, and the stores on SQL Server. A right of a person now says whether it requires a

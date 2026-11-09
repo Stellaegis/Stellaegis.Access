@@ -23,8 +23,8 @@ The library targets .NET 10 and is released under the MIT license.
 | `Stellaegis.Access.AspNetCore` | Access as the rights system of a host — the policy per operation, answered from the request —, the decision routes a resource server apart calls, the projection routes a registry in another process writes through | `Stellaegis.Primitives.AspNetCore`, ASP.NET Core |
 | `Stellaegis.Access.Client` | The decision over HTTP, under the same port as in process, behind a cache of the decisions that the events of Access invalidate | `Stellaegis.Access`, `Stellaegis.Primitives.Hosting`, `Stellaegis.Caching` |
 
-The five packages share one version. They started at the major version of Stellaegis.Primitives, 5; 6.0.0 runs on
-Primitives 5.3.0.
+The five packages share one version. They started at the major version of Stellaegis.Primitives, 5; 6.1.0 runs on
+Primitives 5.6.0.
 
 ## A host, in full
 
@@ -116,7 +116,8 @@ The SQL Server schema has the same tables, names and rules; its identifiers carr
 compares them exactly whatever the collation of the database, and every table is clustered on its key.
 
 A subject is the value of an `Actor`: the `sub` of a person — the GUID `Stellaegis.Identity` issues, in its `N`
-form —, the `client_id` of a client, or a `job:` actor. The operation is its identity, `target.name`, the one the
+form —, the `client_id` of a client, or a `job:` actor, which only the code names: a subject read from a token is
+read by `Actor.TryParseClaim`, and a token naming a job is refused. The operation is its identity, `target.name`, the one the
 module declared and labelled its route with: what Primitives calls an operation is what a rights catalogue calls a
 permission.
 
@@ -234,7 +235,11 @@ builder.Services.AddStellaegisAccessPolicies();
 ```
 
 `HttpAccessDecision` implements `IAccessDecision` over the three decision routes, choosing the route by the kind of
-the subject and the space, and says whether the session proved a second factor. Behind it, `AccessDecisionCache`
+the subject and the space, and says whether the session proved a second factor. Only a decision reaches the person:
+a 204 is a yes, a 403 carrying a code of `AccessErrors` the refusal; anything else throws `HttpRequestException`, and
+the request fails — a 401 of the client's own token among them, a fault of the installation the person cannot mend.
+⚠ A client not granted `decisions.read` is refused by Access with the same codes, and reads as a refusal of every
+person: it fails closed, and the log of Access says whom it refused. Behind it, `AccessDecisionCache`
 keeps the yes only — a right granted is seen at once, a refusal is never kept; a yes given to a session that proved
 a second factor never answers one that did not — for `Stellaegis:Access:Cache:Expiration`, five minutes unless set, under the segments of
 the space and of the subjects. The host invalidates from its subscriptions to the events of Access:

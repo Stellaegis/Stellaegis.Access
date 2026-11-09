@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
@@ -39,8 +40,12 @@ public interface IAccessClientTokenProvider
 /// <summary>
 /// The decision asked over HTTP, under the same port as in process: a person in a compartment goes to
 /// <c>users/decide</c>, a person in the shared space to <c>admins/decide</c>, a client to <c>clients/decide</c>.
-/// A 204 is a yes; a problem details is the refusal, with its code; anything else is an error of transport. The
-/// question for a person carries whether the session proved a second factor.
+/// A 204 is a yes; a 403 carrying a code of <see cref="AccessErrors"/> is the refusal, with that error; anything else
+/// is no decision, and throws <see cref="HttpRequestException"/> — a 401 of the client's own token included, which is a
+/// fault of the installation, never a refusal of the person. ⚠ A client not granted <c>decisions.read</c> is refused
+/// by Access with the same codes, and reads as a refusal of every person: it fails closed, and the log of Access says
+/// whom it refused. The question for a person carries whether the
+/// session proved a second factor.
 /// </summary>
 public sealed class HttpAccessDecision(HttpClient http, IServiceProvider services) : IAccessDecision
 {
@@ -70,12 +75,24 @@ public sealed class HttpAccessDecision(HttpClient http, IServiceProvider service
         if (_tokens is not null && await _tokens.GetTokenAsync(cancellationToken).ConfigureAwait(false) is { } token)
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var response = await http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (response.IsSuccessStatusCode)
+        if (response.StatusCode == HttpStatusCode.NoContent)
             return Result.Success();
-        if (await response.ReadErrorAsync(cancellationToken).ConfigureAwait(false) is { } error)
-            return Result.Failure(error);
-        throw new HttpRequestException($"Access answered {(int)response.StatusCode} without an error to read.", null, response.StatusCode);
+        var error = await response.ReadErrorAsync(cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Forbidden && error is not null && Refusals.TryGetValue(error.Code, out var refusal))
+            return Result.Failure(refusal);
+        throw new HttpRequestException(
+            $"Access answered {(int)response.StatusCode}{(error is null ? "" : $" {error.Code}: {error.Message}")}, which is no decision.",
+            null, response.StatusCode);
     }
+
+    // What the decision routes answer by design: a 204 is a yes, a 403 carrying one of these codes is a refusal of
+    // the person, given back as the error of Access itself. Anything else is not a decision — a 401 of the client's
+    // own token, a question Access found malformed, a success that is not the 204 — and fails the request rather than
+    // reach the person as a refusal.
+    private static readonly Dictionary<string, Error> Refusals = new[]
+    {
+        AccessErrors.NotMember, AccessErrors.Denied, AccessErrors.ViaDenied, AccessErrors.SecondFactorRequired,
+    }.ToDictionary(refusal => refusal.Code, StringComparer.Ordinal);
 
     private sealed record UserQuestion(string Subject, string Compartment, string Operation, string? Via, bool SecondFactor);
 

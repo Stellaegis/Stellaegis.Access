@@ -53,7 +53,7 @@ public sealed class ClientTests
         builder.Services.AddStellaegisModule(ItemsModule.Declaration);
         builder.Services.AddSingleton<IAccessClientTokenProvider, InventoryToken>();
         builder.Services
-            .AddStellaegisAccessClient(options => options.BaseUrl = "http://access.test/api/access", cacheOptions => cacheOptions.Enabled = cache)
+            .AddStellaegisAccessClient(options => { options.BaseUrl = "http://access.test/api/access"; options.AllowPlainHttp = true; }, cacheOptions => cacheOptions.Enabled = cache)
             .ConfigurePrimaryHttpMessageHandler(() => access.GetTestServer().CreateHandler());
         builder.Services.AddStellaegisAccessPolicies();
         builder.Services.AddAuthentication(WebTestHost.HeaderAuthentication.SchemeName)
@@ -178,5 +178,48 @@ public sealed class ClientTests
 
         var refused = await inventory.Services.CreateScope().ServiceProvider.GetRequiredService<IAccessDecision>().DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct);
         Assert.Equal(AccessErrors.SecondFactorRequiredCode, refused.Error!.Code);
+    }
+
+    /// <summary>Access as the client sees it: one answer, whatever was asked.</summary>
+    private sealed class AnsweringAccess(HttpStatusCode status, string? code) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(status);
+            if (code is not null)
+                response.Content = new StringContent($$"""{"status":{{(int)status}},"detail":"Refused.","code":"{{code}}"}""", System.Text.Encoding.UTF8, "application/problem+json");
+            else if (status == HttpStatusCode.OK)
+                response.Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json");
+            return Task.FromResult(response);
+        }
+    }
+
+    private static IAccessDecision DecisionAnswering(HttpStatusCode status, string? code = null)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddStellaegisAccessClient(options => options.BaseUrl = "https://access.test/api/access", cache => cache.Enabled = false)
+            .ConfigurePrimaryHttpMessageHandler(() => new AnsweringAccess(status, code));
+        return services.BuildServiceProvider().GetRequiredService<IAccessDecision>();
+    }
+
+    [Fact]
+    public async Task Only_a_decision_reaches_the_person_and_anything_else_fails_the_request()
+    {
+        Assert.True((await DecisionAnswering(HttpStatusCode.NoContent).DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct)).IsSuccess);
+
+        // A refusal of the person: the error of Access, a refusal still, whatever Primitives reads of a 403.
+        var refused = await DecisionAnswering(HttpStatusCode.Forbidden, AccessErrors.DeniedCode).DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct);
+        Assert.Equal(AccessErrors.Denied, refused.Error);
+        Assert.Equal(ErrorType.Forbidden, refused.Error!.Type);
+
+        // No decision: the client's own token refused, a 403 that is not Access's, a question found malformed, a
+        // success that is not the 204 — none reaches the person as a refusal, nor as a yes.
+        foreach (var (status, code) in new (HttpStatusCode, string?)[]
+        {
+            (HttpStatusCode.Unauthorized, null), (HttpStatusCode.Forbidden, null), (HttpStatusCode.Forbidden, "Other.Refused"),
+            (HttpStatusCode.BadRequest, "Decision.Invalid"), (HttpStatusCode.OK, null), (HttpStatusCode.InternalServerError, null),
+        })
+            await Assert.ThrowsAsync<HttpRequestException>(async () => await DecisionAnswering(status, code).DecideAsync(JaneActor, Acme, ItemsRead, secondFactor: false, Ct));
     }
 }

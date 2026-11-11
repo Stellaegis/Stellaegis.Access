@@ -28,10 +28,10 @@ internal sealed class PostgreSqlAccessStore
             throw new InvalidOperationException($"{nameof(AccessDatabaseOptions)}: {error}");
 
         var registry = new RepositoryRegistry<AccessDatabase>()
-            .Add<MembershipRepository>((connection, transaction) => new MembershipRepository(connection, transaction))
-            .Add<UserGrantRepository>((connection, transaction) => new UserGrantRepository(connection, transaction))
-            .Add<AdminGrantRepository>((connection, transaction) => new AdminGrantRepository(connection, transaction))
-            .Add<ClientGrantRepository>((connection, transaction) => new ClientGrantRepository(connection, transaction));
+            .Add<MembershipRepository>((connection, transaction) => new MembershipRepository((NpgsqlConnection)connection, () => (NpgsqlTransaction?)transaction()))
+            .Add<UserGrantRepository>((connection, transaction) => new UserGrantRepository((NpgsqlConnection)connection, () => (NpgsqlTransaction?)transaction()))
+            .Add<AdminGrantRepository>((connection, transaction) => new AdminGrantRepository((NpgsqlConnection)connection, () => (NpgsqlTransaction?)transaction()))
+            .Add<ClientGrantRepository>((connection, transaction) => new ClientGrantRepository((NpgsqlConnection)connection, () => (NpgsqlTransaction?)transaction()));
 
         _dataSource = NpgsqlDataSource.Create(value.ConnectionString);
         _units = new AdoUnitOfWorkFactory<AccessDatabase>(_dataSource, registry);

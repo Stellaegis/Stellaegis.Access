@@ -18,8 +18,8 @@ The library targets .NET 10 and is released under the MIT license.
 | Package | Contents | Depends on |
 | --- | --- | --- |
 | `Stellaegis.Access` | The decision, the four stores as ports and in memory, the projection by snapshots and its events, the module and its operations | `Stellaegis.Primitives`, `Stellaegis.Primitives.Hosting` |
-| `Stellaegis.Access.PostgreSQL` | The stores on PostgreSQL, and the `authz` schema declared as a module database for the installation and the verification | `Stellaegis.Primitives.Data`, Npgsql, Dapper |
-| `Stellaegis.Access.SqlServer` | The same stores and the same `authz` schema on SQL Server | `Stellaegis.Primitives.Data`, Microsoft.Data.SqlClient, Dapper |
+| `Stellaegis.Access.PostgreSQL` | The stores on PostgreSQL, and the `authz` schema declared as a module database for the installation and the verification | `Stellaegis.Primitives.Data`, Npgsql |
+| `Stellaegis.Access.SqlServer` | The same stores and the same `authz` schema on SQL Server | `Stellaegis.Primitives.Data`, Microsoft.Data.SqlClient |
 | `Stellaegis.Access.AspNetCore` | Access as the rights system of a host — the policy per operation, answered from the request —, the decision routes a resource server apart calls, the projection routes a registry in another process writes through | `Stellaegis.Primitives.AspNetCore`, ASP.NET Core |
 | `Stellaegis.Access.Client` | The decision over HTTP, under the same port as in process, behind a cache of the decisions that the events of Access invalidate | `Stellaegis.Access`, `Stellaegis.Primitives.Hosting`, `Stellaegis.Caching` |
 

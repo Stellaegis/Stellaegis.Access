@@ -13,8 +13,7 @@
     <PackageVersion Include="Stellaegis.Caching" Version="5.0.0" />
     <!-- The demonstration tokens of the example host, samples/ only -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
-    <!-- PostgreSQL -->
-    <PackageVersion Include="Dapper" Version="2.1.89" />
+    <!-- PostgreSQL, SQL Server -->
     <PackageVersion Include="Npgsql" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Data.SqlClient" Version="7.1.1" />
     <!-- Pinned above what Microsoft.Data.SqlClient brings, 9.0.x: CVE-2026-84008, fixed in 10.0.13 -->

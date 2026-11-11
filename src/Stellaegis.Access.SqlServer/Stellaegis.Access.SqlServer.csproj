@@ -5,11 +5,10 @@
     <RootNamespace>Stellaegis.Access.SqlServer</RootNamespace>
     <PackageId>Stellaegis.Access.SqlServer</PackageId>
     <Description>The SQL Server stores of Stellaegis.Access: the effective rights of the three domains — persons in a compartment, operators of the platform, M2M clients — in the schema authz, with the declaration of the database for its installation and its verification at startup.</Description>
-    <PackageTags>stellaegis;access;authorization;sqlserver;dapper</PackageTags>
+    <PackageTags>stellaegis;access;authorization;sqlserver</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" />
     <PackageReference Include="Microsoft.Data.SqlClient" />
     <!-- Pinned above the vulnerable version Microsoft.Data.SqlClient pulls in; see Directory.Packages.props -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" />

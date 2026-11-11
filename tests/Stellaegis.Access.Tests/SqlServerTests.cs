@@ -78,6 +78,20 @@ public sealed class SqlServerStoreTests(SqlServerFixture database) : AccessStore
         Assert.Contains("ConnectionString is required", exception.Message);
     }
 
+    // The driver cuts a string to the size its parameter declares, without an error: under the size of its column, a
+    // decision would compare what is left of a longer value. The statements declare Sizes.Text for every string. If
+    // this test fails, the driver refuses the value, and a statement can declare the size of its column.
+    [Fact]
+    public async Task The_driver_cuts_a_string_to_the_size_its_parameter_declares()
+    {
+        _database.SkipWhenUnavailable();
+        await using var connection = (SqlConnection)await _database.OpenAsync(asApplication: true, Ct);
+        await using var command = new SqlCommand("select @subject", connection);
+        command.Parameters.Add("@subject", System.Data.SqlDbType.NVarChar, 4).Value = "jane-doe";
+
+        Assert.Equal("jane", await command.ExecuteScalarAsync(Ct));
+    }
+
     [Fact]
     public void The_declaration_runs_on_SqlServer_with_its_own_script()
     {

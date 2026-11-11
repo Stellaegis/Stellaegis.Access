@@ -31,10 +31,10 @@ internal sealed class SqlServerAccessStore
     {
         _open = Guard.NotNull(open);
         var registry = new RepositoryRegistry<AccessDatabase>()
-            .Add<MembershipRepository>((connection, transaction) => new MembershipRepository(connection, transaction))
-            .Add<UserGrantRepository>((connection, transaction) => new UserGrantRepository(connection, transaction))
-            .Add<AdminGrantRepository>((connection, transaction) => new AdminGrantRepository(connection, transaction))
-            .Add<ClientGrantRepository>((connection, transaction) => new ClientGrantRepository(connection, transaction));
+            .Add<MembershipRepository>((connection, transaction) => new MembershipRepository((SqlConnection)connection, () => (SqlTransaction?)transaction()))
+            .Add<UserGrantRepository>((connection, transaction) => new UserGrantRepository((SqlConnection)connection, () => (SqlTransaction?)transaction()))
+            .Add<AdminGrantRepository>((connection, transaction) => new AdminGrantRepository((SqlConnection)connection, () => (SqlTransaction?)transaction()))
+            .Add<ClientGrantRepository>((connection, transaction) => new ClientGrantRepository((SqlConnection)connection, () => (SqlTransaction?)transaction()));
 
         _units = new AdoUnitOfWorkFactory<AccessDatabase>(_open, registry);
     }

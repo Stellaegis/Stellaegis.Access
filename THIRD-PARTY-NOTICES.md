@@ -11,7 +11,6 @@ alongside them, each under its own license.
 | Stellaegis.Primitives.Data | `Stellaegis.Access.PostgreSQL`, `Stellaegis.Access.SqlServer` | MIT | <https://github.com/Stellaegis/Stellaegis.Primitives> |
 | Stellaegis.Primitives.AspNetCore | `Stellaegis.Access.AspNetCore` | MIT | <https://github.com/Stellaegis/Stellaegis.Primitives> |
 | Stellaegis.Caching | `Stellaegis.Access.Client` | MIT | <https://github.com/Stellaegis/Stellaegis.Caching> |
-| Dapper | `Stellaegis.Access.PostgreSQL`, `Stellaegis.Access.SqlServer` | Apache-2.0 | <https://github.com/DapperLib/Dapper> |
 | Npgsql | `Stellaegis.Access.PostgreSQL` | PostgreSQL | <https://github.com/npgsql/npgsql> |
 | Microsoft.Data.SqlClient | `Stellaegis.Access.SqlServer` | MIT | <https://github.com/dotnet/SqlClient> |
 | System.Security.Cryptography.Pkcs | `Stellaegis.Access.SqlServer` (pinned above the version Microsoft.Data.SqlClient pulls in) | MIT | <https://github.com/dotnet/runtime> |

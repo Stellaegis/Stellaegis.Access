@@ -10,7 +10,7 @@
     <PackageVersion Include="Stellaegis.Primitives.AspNetCore" Version="5.6.0" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.14" />
     <!-- The cache of decisions of a resource server apart -->
-    <PackageVersion Include="Stellaegis.Caching" Version="5.0.0" />
+    <PackageVersion Include="Stellaegis.Caching" Version="5.0.1" />
     <!-- The demonstration tokens of the example host, samples/ only -->
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
     <!-- PostgreSQL, SQL Server -->

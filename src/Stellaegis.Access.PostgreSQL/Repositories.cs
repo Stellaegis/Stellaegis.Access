@@ -1,3 +1,4 @@
+using System.Data;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -25,7 +26,7 @@ internal sealed class MembershipRepository(NpgsqlConnection connection, Func<Npg
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var compartments = new List<string>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            compartments.Add(reader.GetString(0));
+            compartments.Add(reader.GetString("compartment"));
         return compartments;
     }
 
@@ -216,7 +217,7 @@ internal sealed class ClientGrantRepository(NpgsqlConnection connection, Func<Np
         await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         var operations = new List<string>();
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            operations.Add(reader.GetString(0));
+            operations.Add(reader.GetString("operation"));
         return operations;
     }
 
@@ -260,10 +261,10 @@ internal sealed class ClientGrantRepository(NpgsqlConnection connection, Func<Np
 /// <summary>A row of <c>authz.user_grants</c> or <c>authz.admin_grants</c>, as the decision reads it.</summary>
 internal sealed record GrantRow(string Operation, bool RequiresSecondFactor)
 {
-    /// <summary>The columns <see cref="Read"/> reads, in its order.</summary>
+    /// <summary>The columns <see cref="Read"/> reads.</summary>
     public const string Columns = "operation, requires_second_factor";
 
-    public static GrantRow Read(NpgsqlDataReader row) => new(row.GetString(0), row.GetBoolean(1));
+    public static GrantRow Read(NpgsqlDataReader row) => new(row.GetString("operation"), row.GetBoolean("requires_second_factor"));
 
     public AccessGrant ToGrant() => new(Operation, RequiresSecondFactor);
 }

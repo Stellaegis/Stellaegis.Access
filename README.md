@@ -23,7 +23,7 @@ The library targets .NET 10 and is released under the MIT license.
 | `Stellaegis.Access.AspNetCore` | Access as the rights system of a host — the policy per operation, answered from the request —, the decision routes a resource server apart calls, the projection routes a registry in another process writes through | `Stellaegis.Primitives.AspNetCore`, ASP.NET Core |
 | `Stellaegis.Access.Client` | The decision over HTTP, under the same port as in process, behind a cache of the decisions that the events of Access invalidate | `Stellaegis.Access`, `Stellaegis.Primitives.Hosting`, `Stellaegis.Caching` |
 
-The five packages share one version. They started at the major version of Stellaegis.Primitives, 5; 6.1.0 runs on
+The five packages share one version. They started at the major version of Stellaegis.Primitives, 5; 6.1.1 runs on
 Primitives 5.6.0.
 
 ## A host, in full

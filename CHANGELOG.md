@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [6.1.1] — 2026-11-11
+
+The stores talk to their engine through its provider, and the adapters no longer reference Dapper. What the packages
+do is unchanged, and so is their SQL.
+
+### Changed
+
+- **`Stellaegis.Access.PostgreSQL` and `Stellaegis.Access.SqlServer` no longer reference Dapper.** Their repositories
+  run `NpgsqlCommand` and `SqlCommand`, each parameter under its declared type, each row read by position. Dapper
+  still comes with `Stellaegis.Primitives.Data` 5.x, which both adapters reference.
+- **`Stellaegis.Caching` 5.0.1.**
+
+### Updating from 6.1.0
+
+Take the version: a host has nothing to change.
+
 ## [6.1.0] — 2026-11-09
 
 On `Stellaegis.Primitives` 5.6.0. Its startup refuses a host it used to let through badly assembled, and it reads a

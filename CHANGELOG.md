@@ -7,6 +7,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [6.1.2] — 2026-11-16
+
+On `Stellaegis.Primitives` 6.0.0, whose `Stellaegis.Primitives.Data` no longer references Dapper: an application
+that takes the adapters of this package no longer receives Dapper through them. What the packages do is unchanged,
+and so is their SQL.
+
+### Changed
+
+- **`Stellaegis.Primitives` 6.0.0, `Stellaegis.Caching` 5.0.2, Microsoft.Extensions 10.0.15 and
+  `Microsoft.Data.SqlClient` 7.1.2.** The adapters stopped using Dapper in 6.1.1; until this version it still came
+  with `Stellaegis.Primitives.Data` 5.x, which both adapters reference.
+- **The repositories read each row by the names of its columns**, where 6.1.1 read it by position. By position, a
+  row depends on the order of a list of columns written elsewhere. The statements and what they return are the
+  same.
+
+### Updating from 6.1.1
+
+Take the version: a host has nothing to change in what it asks of this package. The version brings Primitives 6.0.0
+to the host, and two things follow from that, both described in the CHANGELOG of Primitives, § *Updating from 5.6.0*:
+
+1. **The other packages of the family the host references take a version that runs without what
+   `Stellaegis.Primitives.Data` 6.0.0 removed.** That section lists the least version of each. An older PostgreSQL
+   or SQL Server adapter restores on Primitives 6 and fails at its first query.
+2. **Code of the host that used Dapper without referencing it now references it itself**: Dapper came through
+   these packages, and no longer does.
+
 ## [6.1.1] — 2026-11-11
 
 The stores talk to their engine through its provider, and the adapters no longer reference Dapper. What the packages
